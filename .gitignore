@@ -1,0 +1,23 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+
+# PyInstaller large build artifacts
+dist/*.zip
+dist/waterdbible.zip
+build/**/*.zip
+*.dll.bak
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,46 @@
+배포판 만드는 법
+================
+
+.venv/Scripts/python.exe build_dist.py
+
+위 스크립트 하나로 dist/waterdbible.zip 이 만들어진다. (build_dist.py 내부 주석에
+전체 원리 설명 있음)
+
+
+왜 pyinstaller 명령만으로는 안 되는가 (배포 누락 방지 규칙)
+----------------------------------------------------------
+main.py / bible_view.py 는 아래 파일들을 전부 "exe와 같은 폴더" 기준
+상대경로로 읽는다.
+
+    - bible_data/   (성경 본문 .btx/.pkl)
+    - add/          (Hochma.txt, Cross_ref.txt 등 주석/관주 데이터)
+    - settings.json
+    - book.ico
+    - Icon_word.svg
+    - Icon_PPT.svg
+    - bible_data.db (하이라이트/메모, 없으면 첫 실행 시 자동 생성됨)
+
+pyinstaller waterdbible.spec 만 실행하면 datas=[...] 로 지정한 항목들은
+dist/waterdbible/_internal/ 안에만 들어간다. 그런데 exe를 더블클릭했을 때
+실제로 파일을 찾는 위치는 _internal이 아니라 exe와 같은 최상위 폴더이므로,
+저 안에만 있으면 실행 시 파일을 못 찾는다. book.ico, Icon_word.svg,
+Icon_PPT.svg, bible_data.db 는 애초에 spec의 datas에도 없어서 더더욱 그냥
+두면 빠진다.
+
+규칙: 새 리소스 파일을 추가해서 main.py나 다른 탭 코드에서
+`QIcon("파일명")`, `open("파일명")` 처럼 상대경로로 참조하게 만들었다면,
+반드시 build_dist.py 의 REQUIRED_TOP_LEVEL_ITEMS 목록에도 추가할 것.
+빠뜨리면 개발 환경(현재 폴더에서 python main.py 실행)에서는 멀쩡히
+동작하지만 배포판(exe)에서만 아이콘이 안 뜨거나 데이터 로드가 실패하는
+버그가 생긴다. build_dist.py 는 빌드 후 이 목록을 기준으로 검증까지
+자동으로 수행한다 (빠지면 스크립트가 실패하며 알려줌).
+
+settings.json / bible_data.db 는 개발 PC의 개인 설정(절대경로, 개인
+하이라이트 등)이 섞이지 않도록 build_dist.py 가 배포 직전에 정제/새로
+생성한다 (내용을 그대로 복사하지 않음).
+
+
+버전 올릴 때
+------------
+main.py 의 self.setWindowTitle("물댄동산 성경 V.5811.9.x") 문자열을 먼저
+올리고 나서 build_dist.py 를 실행할 것.

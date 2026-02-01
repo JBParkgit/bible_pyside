@@ -1,0 +1,26 @@
+# 물댄동산 성경 (Bible Viewer PySide) - Python dependencies
+# 설치: pip install -r requirements.txt
+
+# --- 실행에 필요한 핵심 패키지 ---
+PySide6==6.9.1
+PySide6_Addons==6.9.1
+PySide6_Essentials==6.9.1
+shiboken6==6.9.1
+pyqtdarktheme==2.1.0
+darkdetect==0.7.1
+pywin32==311
+pywin32-ctypes==0.2.3
+
+# --- 선택: 추가 테마 / 아이콘 ---
+qt-material==2.17
+QtAwesome==1.4.0
+QtPy==2.4.3
+
+# --- 빌드(PyInstaller)에 필요 ---
+pyinstaller==6.14.2
+pyinstaller-hooks-contrib==2025.8
+altgraph==0.17.4
+pefile==2023.2.7
+packaging==25.0
+Jinja2==3.1.6
+MarkupSafe==3.0.2

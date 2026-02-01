@@ -1,0 +1,19 @@
+{
+    "book": "데살로니가전서",
+    "chapter": 3,
+    "font_family": "맑은 고딕",
+    "bible_font_size": 14,
+    "verse_display_mode": 0,
+    "num_views": 2,
+    "view_translations": [
+        "개역개정",
+        "새번역"
+    ],
+    "commentary_font_size": 14,
+    "crossref_display_font_size": 14,
+    "crossref_display_translation": "개역개정",
+    "verse_collection_file": "my_verse_collection.txt",
+    "verse_collection_font_size": 14,
+    "search_font_size": 14,
+    "theme": "Light"
+}

@@ -1,0 +1,26 @@
+{
+    "book": "창세기",
+    "chapter": 1,
+    "font_family": "맑은 고딕",
+    "bible_font_size": 13,
+    "verse_display_mode": 1,
+    "num_views": 2,
+    "view_translations": [
+        "개역개정",
+        "개역개정"
+    ],
+    "commentary_font_size": 13,
+    "crossref_display_font_size": 13,
+    "crossref_display_translation": "개역개정",
+    "crossref_style_mode": 1,
+    "composite_commentary_font_size": 13,
+    "composite_crossref_font_size": 13,
+    "composite_crossref_translation": "개역개정",
+    "composite_crossref_style_mode": 1,
+    "verse_collection_file": "my_verse_collection.txt",
+    "verse_collection_font_size": 14,
+    "search_font_size": 14,
+    "theme": "Light",
+    "comparison_font_size": 13,
+    "default_start_tab": 1
+}

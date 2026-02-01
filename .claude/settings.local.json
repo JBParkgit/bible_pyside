@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pip:*)",
+      "Bash(find:*)",
+      "Bash(python main.py:*)"
+    ]
+  }
+}
