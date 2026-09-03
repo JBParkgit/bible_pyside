@@ -45,12 +45,56 @@ class BibleDataLoader:
             self.full_book_names[abbr] = full_name
             self.full_book_names[full_name] = full_name
         self.numbered_full_book_names = {full: f"{num}{full}" for num, abbr, full in self.book_definitions}
+
+        # 언어별 성경책 전체 이름 (book_definitions 순서: 01 창세기 … 66 요한계시록)
+        _english_full_names = [
+            "Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy", "Joshua", "Judges", "Ruth",
+            "1 Samuel", "2 Samuel", "1 Kings", "2 Kings", "1 Chronicles", "2 Chronicles", "Ezra",
+            "Nehemiah", "Esther", "Job", "Psalms", "Proverbs", "Ecclesiastes", "Song of Solomon",
+            "Isaiah", "Jeremiah", "Lamentations", "Ezekiel", "Daniel", "Hosea", "Joel", "Amos",
+            "Obadiah", "Jonah", "Micah", "Nahum", "Habakkuk", "Zephaniah", "Haggai", "Zechariah",
+            "Malachi", "Matthew", "Mark", "Luke", "John", "Acts", "Romans", "1 Corinthians",
+            "2 Corinthians", "Galatians", "Ephesians", "Philippians", "Colossians", "1 Thessalonians",
+            "2 Thessalonians", "1 Timothy", "2 Timothy", "Titus", "Philemon", "Hebrews", "James",
+            "1 Peter", "2 Peter", "1 John", "2 John", "3 John", "Jude", "Revelation",
+        ]
+        _chinese_full_names = [
+            "創世記", "出埃及記", "利未記", "民數記", "申命記", "約書亞記", "士師記", "路得記",
+            "撒母耳記上", "撒母耳記下", "列王紀上", "列王紀下", "歷代志上", "歷代志下", "以斯拉記",
+            "尼希米記", "以斯帖記", "約伯記", "詩篇", "箴言", "傳道書", "雅歌", "以賽亞書",
+            "耶利米書", "耶利米哀歌", "以西結書", "但以理書", "何西阿書", "約珥書", "阿摩司書",
+            "俄巴底亞書", "約拿書", "彌迦書", "那鴻書", "哈巴谷書", "西番雅書", "哈該書",
+            "撒迦利亞書", "瑪拉基書", "馬太福音", "馬可福音", "路加福音", "約翰福音", "使徒行傳",
+            "羅馬書", "哥林多前書", "哥林多後書", "加拉太書", "以弗所書", "腓立比書", "歌羅西書",
+            "帖撒羅尼迦前書", "帖撒羅尼迦後書", "提摩太前書", "提摩太後書", "提多書", "腓利門書",
+            "希伯來書", "雅各書", "彼得前書", "彼得後書", "約翰一書", "約翰二書", "約翰三書",
+            "猶大書", "啟示錄",
+        ]
+        # 중국어 표준 단자(單字) 약어 (和合本 관용)
+        _chinese_abbrs = [
+            "創", "出", "利", "民", "申", "書", "士", "得",
+            "撒上", "撒下", "王上", "王下", "代上", "代下", "拉",
+            "尼", "斯", "伯", "詩", "箴", "傳", "歌", "賽",
+            "耶", "哀", "結", "但", "何", "珥", "摩",
+            "俄", "拿", "彌", "鴻", "哈", "番", "該",
+            "亞", "瑪", "太", "可", "路", "約", "徒",
+            "羅", "林前", "林後", "加", "弗", "腓", "西",
+            "帖前", "帖後", "提前", "提後", "多", "門",
+            "來", "雅", "彼前", "彼後", "約壹", "約貳", "約參",
+            "猶", "啟",
+        ]
+        _korean_full_names = [full for num, abbr, full in self.book_definitions]
+        self.full_name_to_english_full_map = dict(zip(_korean_full_names, _english_full_names))
+        self.full_name_to_chinese_full_map = dict(zip(_korean_full_names, _chinese_full_names))
+        self.full_name_to_chinese_abbr_map = dict(zip(_korean_full_names, _chinese_abbrs))
+
         self.translation_file_map = self._get_translation_file_map()
         self.loaded_translations = {}
         self.global_book_chapter_counts = {}
 
     def _create_book_alias_map(self):
         mapping = {}
+        self.full_name_to_english_abbr_map = {}
         book_mappings_raw = """
             GN,창,ckd,창세기
             Ex,출,cnf,출애굽기
@@ -123,14 +167,55 @@ class BibleDataLoader:
             parts = [p.strip() for p in line.split(',')]
             if len(parts) == 4:
                 english_abbr, korean_abbr, phonetic_korean, full_korean_name = parts
-                mapping[english_abbr.lower()] = full_korean_name
-                mapping[korean_abbr.lower()] = full_korean_name
+            elif len(parts) == 3:
+                english_abbr, korean_abbr, full_korean_name = parts
+                phonetic_korean = None
+            else:
+                continue
+            self.full_name_to_english_abbr_map[full_korean_name] = english_abbr
+            mapping[english_abbr.lower()] = full_korean_name
+            mapping[korean_abbr.lower()] = full_korean_name
+            if phonetic_korean:
                 mapping[phonetic_korean.lower()] = full_korean_name
-                mapping[full_korean_name.lower()] = full_korean_name
-                mapping[english_abbr] = full_korean_name
-                mapping[korean_abbr] = full_korean_name
-                mapping[full_korean_name] = full_korean_name
+            mapping[full_korean_name.lower()] = full_korean_name
+            mapping[english_abbr] = full_korean_name
+            mapping[korean_abbr] = full_korean_name
+            mapping[full_korean_name] = full_korean_name
         return mapping
+
+    def get_book_abbr(self, full_name, translation_name=None, language=None):
+        """번역본 언어에 맞는 성경책 약어를 돌려준다.
+        영어 번역본이면 영어 약어(Gen, Jn ...), 중국어면 단자 약어(創, 約 ...),
+        그 외에는 한글 약어(창, 요 ...).
+        """
+        if language is None and translation_name:
+            try:
+                language = self.load_translation_data(translation_name).get('language', 'unknown')
+            except Exception:
+                language = 'unknown'
+        if language == 'english':
+            return self.full_name_to_english_abbr_map.get(
+                full_name, self.full_name_to_abbr_map.get(full_name, full_name))
+        if language == 'chinese':
+            return self.full_name_to_chinese_abbr_map.get(
+                full_name, self.full_name_to_abbr_map.get(full_name, full_name))
+        return self.full_name_to_abbr_map.get(full_name, full_name)
+
+    def get_book_full_name(self, full_name, translation_name=None, language=None):
+        """번역본 언어에 맞는 성경책 전체 이름을 돌려준다.
+        영어 번역본이면 'Genesis', 중국어 번역본이면 '創世記', 그 외에는 한글 이름 그대로.
+        `full_name` 은 한글 전체 이름(예: '창세기').
+        """
+        if language is None and translation_name:
+            try:
+                language = self.load_translation_data(translation_name).get('language', 'unknown')
+            except Exception:
+                language = 'unknown'
+        if language == 'english':
+            return self.full_name_to_english_full_map.get(full_name, full_name)
+        if language == 'chinese':
+            return self.full_name_to_chinese_full_map.get(full_name, full_name)
+        return full_name
 
     def _get_translation_file_map(self):
         translation_map = {}
@@ -164,6 +249,8 @@ class BibleDataLoader:
             NLT,eNLT.btx
             NRSV,eNRSV.btx
             中文和合本,CUV.btx
+            위구르어_키릴문자,uUYGCyr.btx
+            위구르어_아랍문자,uUYGAra.btx
             """.strip().split('\n')
             for line in file_info:
                 parts = line.strip().split(',')
@@ -177,6 +264,24 @@ class BibleDataLoader:
                 elif os.path.exists(btx_path):
                     translation_map[translation_name] = btx_path
         return translation_map
+
+    def _get_translation_metadata(self, translation_name, base_filename):
+        metadata = {
+            "uUYGCyr": {"language": "uyghur_cyrillic", "direction": "ltr"},
+            "uUYGAra": {"language": "uyghur_arabic", "direction": "rtl"},
+        }
+        if base_filename in metadata:
+            return metadata[base_filename]
+
+        language = "unknown"
+        if base_filename.startswith("k"):
+            language = "korean"
+        elif base_filename.startswith("e"):
+            language = "english"
+        elif base_filename.startswith("C"):
+            language = "chinese"
+
+        return {"language": language, "direction": "ltr"}
 
     def load_translation_data(self, translation_name):
         if translation_name in self.loaded_translations:
@@ -196,21 +301,17 @@ class BibleDataLoader:
         base_filename = os.path.splitext(os.path.basename(btx_filepath))[0]
         pkl_filepath = os.path.join(self.base_data_path, f"{base_filename}.pkl")
 
-        # Infer language from the filename prefix
-        language = 'unknown'
-        if base_filename.startswith('k'):
-            language = 'korean'
-        elif base_filename.startswith('e'):
-            language = 'english'
-        elif base_filename.startswith('C'): # Assuming 'CUV' is Chinese
-            language = 'chinese'
+        metadata = self._get_translation_metadata(translation_name, base_filename)
+        language = metadata["language"]
+        direction = metadata["direction"]
 
 
         if os.path.exists(pkl_filepath):
             try:
                 with open(pkl_filepath, 'rb') as f:
                     result = pickle.load(f)
-                    result['language'] = language # Add language information
+                    result['language'] = result.get('language', language)
+                    result['direction'] = result.get('direction', direction)
                     self.loaded_translations[translation_name] = result
                     self.global_book_chapter_counts = result["book_chapter_counts"]
                     return result
@@ -242,7 +343,7 @@ class BibleDataLoader:
                         subtitle_buffer.append(line)
                         continue
 
-                    match = re.match(r'(\d{2})\s*(\d+):(\d+)\s*(.+)', line)
+                    match = re.match(r'(\d{2})\s*(\d+):(\d+)\s*(.*)', line)
                     if match:
                         parsed_book_num_str, parsed_chapter_str, _, verse_text = match.groups()
                         inferred_book_name = self.book_order_map.get(parsed_book_num_str)
@@ -268,7 +369,12 @@ class BibleDataLoader:
                 if full_name not in book_chapter_counts or book_chapter_counts[full_name] == 0:
                     book_chapter_counts[full_name] = 1
 
-            result = {"bible_data": bible_data, "book_chapter_counts": book_chapter_counts, "language": language} # Add language here too
+            result = {
+                "bible_data": bible_data,
+                "book_chapter_counts": book_chapter_counts,
+                "language": language,
+                "direction": direction,
+            }
             self.loaded_translations[translation_name] = result
             self.global_book_chapter_counts = book_chapter_counts
             return result

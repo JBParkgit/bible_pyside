@@ -52,7 +52,8 @@ class SearchTab(QWidget):
         option2 = QRadioButton("창 1:1")
         self.style_option_group.addButton(option1, 0)
         self.style_option_group.addButton(option2, 1)
-        option1.setChecked(True)
+        # 기본값: 괄호 없는 구절 표시 (창 1:1)
+        option2.setChecked(True)
         top_bar_layout.addWidget(self.font_minus_button)
         top_bar_layout.addWidget(self.font_size_label)
         top_bar_layout.addWidget(self.font_plus_button)
@@ -138,19 +139,30 @@ class SearchTab(QWidget):
         highlight_color = QApplication.palette().highlight().color().name()
         highlight_text_color = QApplication.palette().highlightedText().color().name()
         highlight_style = f"style='background-color: {highlight_color}; color: {highlight_text_color};'"
+        text_color = QApplication.palette().color(QPalette.ColorRole.Text).name()
+        ref_color = QApplication.palette().color(QPalette.ColorRole.Link).name()
         style_option = self.style_option_group.checkedId()
+        language = 'unknown'
         try:
             language = self.data_loader.load_translation_data(self.last_translation).get('language', 'unknown')
             self.results_browser.setWordWrapMode(QTextOption.WrapAnywhere if language in ['korean', 'chinese'] else QTextOption.WrapAtWordBoundaryOrAnywhere)
         except Exception:
             self.results_browser.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
+        # 구절 표시를 굵게/링크색으로 구분하고, 줄바꿈 시 본문이 구절표시 아래로
+        # 들어가지 않도록 매달린 들여쓰기(hanging indent)를 준다.
+        indent = max(64, int(self.font_size * 6.5))
         for book, chapter, verse_num, verse_text in self.last_search_results:
-            book_abbr = self.data_loader.full_name_to_abbr_map.get(book, "")
+            book_abbr = self.data_loader.get_book_abbr(book, language=language)
             highlighted_text = verse_text
             for keyword in self.last_keywords:
                 highlighted_text = re.sub(re.escape(keyword), f"<span {highlight_style}>{keyword}</span>", highlighted_text, flags=re.IGNORECASE)
             prefix = f"({book_abbr} {chapter}:{verse_num})" if style_option == 0 else f"{book_abbr} {chapter}:{verse_num}"
-            html_content.append(f"<p><span style='color:{QApplication.palette().color(QPalette.ColorRole.Text).name()};'>{prefix}</span> {highlighted_text}</p>")
+            html_content.append(
+                f"<p style='margin-top:0; margin-bottom:9px; margin-left:{indent}px; "
+                f"text-indent:-{indent}px; line-height:1.35;'>"
+                f"<b><span style='color:{ref_color};'>{prefix}</span></b>&nbsp;&nbsp;"
+                f"<span style='color:{text_color};'>{highlighted_text}</span></p>"
+            )
         self.results_browser.setHtml("".join(html_content))
         
     @Slot(QPoint)

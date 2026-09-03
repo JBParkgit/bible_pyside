@@ -36,6 +36,12 @@ from popups import BookChapterPopup
 from additional_read_tab import AdditionalReadTab
 from composite_tab import CompositeTab
 from bible_database import BibleDatabase
+from original_language_data import OriginalLanguageDataLoader
+from original_language_tab import OriginalLanguageTab
+from ai_explain import (
+    GeminiClient, AiExplanationDialog, AiSettingsDialog, build_prompt,
+    DEFAULT_MODEL, LEGACY_DEFAULT_MODELS,
+)
 
 
 import qdarktheme
@@ -591,6 +597,7 @@ class MainWindow(QMainWindow):
             self.data_loader.load_translation_data(self.data_loader.get_available_translations()[0])
             self.commentary_data_loader = CommentaryDataLoader()
             self.crossref_data_loader = CrossrefDataLoader()
+            self.original_language_data_loader = OriginalLanguageDataLoader(self.data_loader)
         except Exception as e:
             QMessageBox.critical(self, "초기화 오류", f"프로그램 시작 오류: {e}\n프로그램을 종료합니다.")
             sys.exit(1)
@@ -604,6 +611,18 @@ class MainWindow(QMainWindow):
         
         self.current_book = self._settings.get('book', "창세기")
         self.current_chapter = self._settings.get('chapter', 1)
+
+        # AI 설명(Gemini)
+        # 이전 기본 모델이 신규 사용자에게 더 이상 제공되지 않으므로 최신 기본값으로 이전
+        if self._settings.get('gemini_model') in LEGACY_DEFAULT_MODELS:
+            self._settings['gemini_model'] = DEFAULT_MODEL
+        self.gemini_client = GeminiClient(self)
+        self.gemini_client.finished.connect(self._on_ai_explanation_ready)
+        self.gemini_client.failed.connect(self._on_ai_explanation_failed)
+        self.gemini_client.retrying.connect(self._on_ai_explanation_retrying)
+        self.ai_dialog = None
+        self._last_ai_request = None
+
         self.init_ui()
         self.connect_signals()
         self.init_shortcuts()
@@ -614,6 +633,7 @@ class MainWindow(QMainWindow):
         
         self.commentary_tab.update_all_content(self.current_book, self.current_chapter, 1)
         self.crossref_tab.update_all_content(self.current_book, self.current_chapter, 1)
+        self.original_language_tab.update_all_content(self.current_book, self.current_chapter, 1)
         self.apply_theme(self._settings.get('theme', 'Dark'))
 
         self.add_to_history(self.current_book, self.current_chapter, 1)
@@ -646,6 +666,7 @@ class MainWindow(QMainWindow):
         self.crossref_tab = CrossRefTab(self.data_loader, self.crossref_data_loader, initial_settings=self._settings, bible_db=self.bible_db)
         self.verse_collection_tab = VerseCollectionTab(file_path=self._settings.get('verse_collection_file', 'my_verse_collection.txt'), initial_settings=self._settings)
         self.memo_tab = MemoTab(self.data_loader, initial_settings=self._settings, bible_db=self.bible_db)
+        self.original_language_tab = OriginalLanguageTab(self.original_language_data_loader)
         
         self.composite_tab = CompositeTab(self.data_loader, self.commentary_data_loader, self.crossref_data_loader, initial_settings=self._settings, bible_db=self.bible_db)
 
@@ -657,6 +678,7 @@ class MainWindow(QMainWindow):
         self.tab_widget.addTab(self.crossref_tab, "관주")
         self.tab_widget.addTab(self.verse_collection_tab, "편집")
         self.tab_widget.addTab(self.memo_tab, "메모")
+        self.tab_widget.addTab(self.original_language_tab, "원어")
         # --- 수정 끝
         
         # <<< 수정됨: 툴팁 설정 방식을 indexOf로 변경하여 순서에 무관하게 설정
@@ -667,6 +689,7 @@ class MainWindow(QMainWindow):
         self.tab_widget.setTabToolTip(self.tab_widget.indexOf(self.crossref_tab), "관주 탭으로 이동 (F5)")
         self.tab_widget.setTabToolTip(self.tab_widget.indexOf(self.verse_collection_tab), "편집 탭으로 이동 (F6)")
         self.tab_widget.setTabToolTip(self.tab_widget.indexOf(self.memo_tab), "메모 탭으로 이동 (F7)")
+        self.tab_widget.setTabToolTip(self.tab_widget.indexOf(self.original_language_tab), "원어 탭으로 이동 (F11)")
         # --- 수정 끝
 
         # 기본 시작 탭 표시(·) 및 툴팁 갱신
@@ -789,6 +812,17 @@ class MainWindow(QMainWindow):
         sep2.setFrameShadow(QFrame.Shadow.Sunken)
         layout.addWidget(sep2)
 
+        # 절 표시 스타일: 설정 메뉴 안에 있던 것을 툴바로 노출
+        self.verse_style_combo = QComboBox()
+        self.verse_style_combo.addItems(["(창 1:1)", "창 1:1", "1."])
+        self.verse_style_combo.setToolTip("절 표시 스타일")
+        layout.addWidget(self.verse_style_combo)
+
+        sep_style = QFrame()
+        sep_style.setFrameShape(QFrame.Shape.VLine)
+        sep_style.setFrameShadow(QFrame.Shadow.Sunken)
+        layout.addWidget(sep_style)
+
         self.settings_btn = QPushButton("설정 및 추출")
         layout.addWidget(self.settings_btn)
 
@@ -808,7 +842,9 @@ class MainWindow(QMainWindow):
             if theme_name == current_theme:
                 action.setChecked(True)
 
-        style_menu = settings_menu.addMenu("절 표시 스타일")
+        # 절 표시 스타일은 툴바의 verse_style_combo 로 옮겼다. 다만 다른 코드들이
+        # self.style_action_group.checkedAction() 로 현재 값을 읽으므로, 액션 그룹은
+        # 메뉴에 노출하지 않은 채로 상태 보관용으로 유지한다.
         self.style_action_group = QActionGroup(self)
         self.style_action_group.setExclusive(True)
         initial_verse_display_mode = self._settings.get('verse_display_mode', 0)
@@ -816,11 +852,14 @@ class MainWindow(QMainWindow):
             action = QAction(text, self, checkable=True)
             action.setData(i)
             self.style_action_group.addAction(action)
-            style_menu.addAction(action)
             if i == initial_verse_display_mode: action.setChecked(True)
+        self.verse_style_combo.setCurrentIndex(initial_verse_display_mode)
         
         self.font_settings_action = QAction("폰트 및 글자 크기 설정...", self)
         settings_menu.addAction(self.font_settings_action)
+
+        self.ai_settings_action = QAction("AI 설명 설정 (Gemini)...", self)
+        settings_menu.addAction(self.ai_settings_action)
 
         settings_menu.addSeparator()
         
@@ -865,6 +904,7 @@ class MainWindow(QMainWindow):
 
         self.theme_action_group.triggered.connect(self.on_theme_action_triggered)
         self.font_settings_action.triggered.connect(self.open_font_settings_dialog)
+        self.ai_settings_action.triggered.connect(self.open_ai_settings_dialog)
         self.extract_action.triggered.connect(self.open_text_extractor)
         self.read_mode_btn.clicked.connect(self.open_read_mode)
         
@@ -876,7 +916,8 @@ class MainWindow(QMainWindow):
         self.import_data_action.triggered.connect(self.import_data)
 
         self.style_action_group.triggered.connect(self.on_style_action_triggered)
-        
+        self.verse_style_combo.currentIndexChanged.connect(self.on_verse_style_combo_changed)
+
         self.view_count_combo.currentIndexChanged.connect(self.on_view_count_selected)
         
         self.read_tab.view_count_changed.connect(self.update_view_count_display)
@@ -908,6 +949,7 @@ class MainWindow(QMainWindow):
         self.crossref_tab.request_add_to_collection.connect(self.send_selected_text_to_verse_collection)
         self.crossref_tab.request_send_to_word.connect(self.on_request_send_to_word)
         self.crossref_tab.request_send_to_powerpoint.connect(self.on_request_send_to_powerpoint)
+        self.original_language_tab.request_navigation.connect(self.go_to_verse_in_read_tab)
 
         self.verse_collection_tab.request_send_to_word.connect(self.on_request_send_to_word)
         self.verse_collection_tab.request_send_to_powerpoint.connect(self.on_request_send_to_powerpoint)
@@ -937,6 +979,7 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("F7"), self, lambda: self.tab_widget.setCurrentWidget(self.memo_tab))
 
         QShortcut(QKeySequence("F10"), self, lambda: self.tab_widget.setCurrentWidget(self.composite_tab)) # <<< (5) 수정됨
+        QShortcut(QKeySequence("F11"), self, lambda: self.tab_widget.setCurrentWidget(self.original_language_tab))
 
         QShortcut(QKeySequence("Ctrl+D"), self, lambda: self.nav_input.setFocus())
         QShortcut(QKeySequence("Ctrl+F"), self, lambda: self.search_input.setFocus())
@@ -1019,12 +1062,24 @@ class MainWindow(QMainWindow):
         new_view.request_add_to_collection.connect(self.send_selected_text_to_verse_collection)
         new_view.request_send_to_word.connect(self.on_request_send_to_word)
         new_view.request_send_to_powerpoint.connect(self.on_request_send_to_powerpoint)
+        new_view.request_original_language.connect(self.go_to_original_language_for_range)
+        new_view.request_ai_explanation.connect(self.request_ai_explanation_for_selection)
         new_view.highlight_changed.connect(self.on_highlight_changed)
     
     @Slot()
     def on_highlight_changed(self):
-        """하이라이트 변경 시 모든 탭 갱신"""
-        self.update_all_tabs_content()
+        """하이라이트 변경 시 현재 보이는 성경 뷰만 스크롤 위치를 유지한 채 갱신한다.
+        update_all_tabs_content() 는 update_all_views()/구절 재정렬을 거쳐 스크롤이
+        튀므로 하이라이트 토글에는 쓰지 않는다."""
+        views = list(self.read_tab.get_bible_views())
+        for tab in getattr(self, 'additional_read_tabs', []):
+            views.extend(tab.get_bible_views())
+        for aux in (self.commentary_tab, self.crossref_tab, self.memo_tab, self.composite_tab):
+            bible_view = getattr(aux, 'bible_view', None)
+            if bible_view is not None:
+                views.append(bible_view)
+        for view in views:
+            view.update_content(preserve_scroll=True, realign_verse=False)
 
     def sync_aux_tabs_with_main_view(self):
         bible_views = self.read_tab.get_bible_views()
@@ -1089,6 +1144,79 @@ class MainWindow(QMainWindow):
             self.composite_tab.set_crossref_font_size(selected_composite_crossref_font_size)
             
             self.save_settings()
+
+    # --- AI 설명 (Gemini) ---------------------------------------------------
+    def open_ai_settings_dialog(self):
+        dialog = AiSettingsDialog(
+            self._settings.get('gemini_api_key', ''),
+            self._settings.get('gemini_model', DEFAULT_MODEL),
+            self._settings.get('gemini_prompt', ''),
+            self,
+        )
+        if dialog.exec():
+            key, model, prompt = dialog.values()
+            self._settings['gemini_api_key'] = key
+            self._settings['gemini_model'] = model or DEFAULT_MODEL
+            self._settings['gemini_prompt'] = prompt
+            self.save_settings()
+
+    @Slot(str, str, str)
+    def request_ai_explanation_for_selection(self, reference, passage, translation):
+        api_key = self._settings.get('gemini_api_key', '')
+        if not api_key:
+            answer = QMessageBox.question(
+                self, "AI 설명",
+                "Gemini API 키가 설정되어 있지 않습니다.\n지금 설정하시겠습니까?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if answer == QMessageBox.StandardButton.Yes:
+                self.open_ai_settings_dialog()
+            return
+
+        self._last_ai_request = (reference, passage, translation)
+        if self.ai_dialog is None:
+            self.ai_dialog = AiExplanationDialog(
+                self, self.font_family, self._settings.get('bible_font_size', 13)
+            )
+            self.ai_dialog.regenerate_requested.connect(self._regenerate_ai_explanation)
+        self.ai_dialog.start(reference)
+        self.gemini_client.explain(
+            api_key,
+            self._settings.get('gemini_model', DEFAULT_MODEL),
+            build_prompt(reference, passage, translation,
+                         self._settings.get('gemini_prompt', '')),
+        )
+
+    @Slot()
+    def _regenerate_ai_explanation(self):
+        if not self._last_ai_request:
+            return
+        reference, passage, translation = self._last_ai_request
+        api_key = self._settings.get('gemini_api_key', '')
+        if not api_key or self.ai_dialog is None:
+            return
+        self.ai_dialog.start(reference)
+        self.gemini_client.explain(
+            api_key,
+            self._settings.get('gemini_model', DEFAULT_MODEL),
+            build_prompt(reference, passage, translation,
+                         self._settings.get('gemini_prompt', '')),
+        )
+
+    @Slot(str)
+    def _on_ai_explanation_ready(self, text):
+        if self.ai_dialog is not None:
+            self.ai_dialog.show_result(text)
+
+    @Slot(str)
+    def _on_ai_explanation_failed(self, message):
+        if self.ai_dialog is not None:
+            self.ai_dialog.show_error(message)
+
+    @Slot(int, int)
+    def _on_ai_explanation_retrying(self, attempt, total):
+        if self.ai_dialog is not None:
+            self.ai_dialog.note_retry(attempt, total)
 
     def apply_global_font(self):
         for i in range(self.tab_widget.count()):
@@ -1356,6 +1484,7 @@ class MainWindow(QMainWindow):
         self.commentary_tab.setStyleSheet(in_tab_control_stylesheet)
         self.crossref_tab.setStyleSheet(in_tab_control_stylesheet)
         self.composite_tab.setStyleSheet(in_tab_control_stylesheet) # '통합' 탭에도 적용
+        self.original_language_tab.setStyleSheet(in_tab_control_stylesheet)
 
         all_bible_views = self.read_tab.get_bible_views() + \
                           [self.commentary_tab.bible_view, self.crossref_tab.bible_view, self.memo_tab.bible_view, self.composite_tab.bible_view]
@@ -1445,6 +1574,8 @@ class MainWindow(QMainWindow):
                 widget.bible_view.update_theme()
                 widget.bible_view.update_content(preserve_scroll=True)
                 widget.update_location(self.current_book, self.current_chapter)
+            elif widget == self.original_language_tab:
+                widget.update_all_content(self.current_book, self.current_chapter, widget.current_verse)
             
             # <<< (6) 수정됨
             elif widget == self.composite_tab:
@@ -1467,6 +1598,13 @@ class MainWindow(QMainWindow):
 
     @Slot(QAction)
     def on_style_action_triggered(self, action: QAction): self.on_style_radio_selected(action.data())
+
+    @Slot(int)
+    def on_verse_style_combo_changed(self, index):
+        actions = self.style_action_group.actions()
+        if 0 <= index < len(actions) and not actions[index].isChecked():
+            actions[index].setChecked(True)
+        self.on_style_radio_selected(index)
 
     @Slot(int)
     def on_style_radio_selected(self, mode_id):
@@ -1574,7 +1712,10 @@ class MainWindow(QMainWindow):
             'search_font_size': self.search_tab.font_size, 
             'theme': theme,
             'comparison_font_size': self.comparison_font_size,
-            'default_start_tab': self._settings.get('default_start_tab', 0)
+            'default_start_tab': self._settings.get('default_start_tab', 0),
+            'gemini_api_key': self._settings.get('gemini_api_key', ''),
+            'gemini_model': self._settings.get('gemini_model', DEFAULT_MODEL),
+            'gemini_prompt': self._settings.get('gemini_prompt', ''),
         }
         
         try:
@@ -1742,7 +1883,15 @@ class MainWindow(QMainWindow):
     def go_to_commentary_for_verse(self, book: str, chapter: int, verse: int): self.go_to_verse(self.commentary_tab, book, chapter, verse)
     @Slot(str, int, int)
     def go_to_crossref_for_verse(self, book: str, chapter: int, verse: int): self.go_to_verse(self.crossref_tab, book, chapter, verse)
-    
+
+    @Slot(str, int, int, int)
+    def go_to_original_language_for_range(self, book: str, chapter: int, start_verse: int, end_verse: int):
+        self.add_to_history(book, chapter, start_verse)
+        self.navigate_to(book, chapter)
+        self.original_language_tab.update_all_content(book, chapter, start_verse, highlight=True)
+        if self.tab_widget.currentWidget() is not self.original_language_tab:
+            self.tab_widget.setCurrentWidget(self.original_language_tab)
+
     @Slot(str, int, int)
     def go_to_verse_in_new_read_tab(self, book, chapter, verse):
         if len(self.additional_read_tabs) >= 3:

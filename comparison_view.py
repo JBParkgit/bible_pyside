@@ -8,6 +8,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Slot, Signal
 from PySide6.QtGui import QFont
 
+from html_utils import get_direction_style, html_escape
+
 class ComparisonDialog(QDialog):
     """
     한 구절을 모든 번역본으로 비교하여 보여주는 대화상자.
@@ -16,12 +18,13 @@ class ComparisonDialog(QDialog):
     # 폰트 크기 변경 신호 정의
     font_size_changed = Signal(int)
 
-    def __init__(self, data_loader, book, chapter, verse, parent=None, stylesheet="", font_family="Malgun Gothic", font_size=12):
+    def __init__(self, data_loader, book, chapter, verse, parent=None, stylesheet="", font_family="Malgun Gothic", font_size=12, end_verse=None):
         super().__init__(parent)
         self.data_loader = data_loader
         self.current_book = book
         self.current_chapter = chapter
         self.current_verse = verse
+        self.end_verse = end_verse or verse
         self.verse_count = 0
         self.font_family = font_family
         self.font_size = font_size
@@ -146,6 +149,7 @@ class ComparisonDialog(QDialog):
             self.verse_count = 0
 
         self.current_verse = max(1, min(verse, self.verse_count if self.verse_count > 0 else 1))
+        self.end_verse = max(self.current_verse, min(self.end_verse, self.verse_count if self.verse_count > 0 else self.current_verse))
 
         self.update_nav_display()
         self.update_verse_combo()
@@ -164,19 +168,54 @@ class ComparisonDialog(QDialog):
 
     def update_content(self):
         self.text_browser.clear()
+        self.text_browser.setLayoutDirection(Qt.LeftToRight)
         
         translations = self.data_loader.get_available_translations()
-        html_parts = [f"<h3>{self.current_book} {self.current_chapter}:{self.current_verse}</h3>"]
+        start = min(self.current_verse, self.end_verse)
+        end = max(self.current_verse, self.end_verse)
+        if start == end:
+            reference = f"{self.current_book} {self.current_chapter}:{start}"
+        else:
+            reference = f"{self.current_book} {self.current_chapter}:{start}-{end}"
+
+        html_parts = [
+            "<html><head><style>",
+            "body { font-family: 'Malgun Gothic', Arial, sans-serif; line-height: 1.55; }",
+            ".translation { margin-bottom: 18px; }",
+            ".translation-title { font-weight: 700; margin-bottom: 4px; }",
+            ".verse-line { margin: 2px 0; }",
+            ".verse-number { color: #57606a; font-size: 90%; }",
+            "</style></head><body>",
+            f"<h3>{html_escape(reference)}</h3>",
+        ]
 
         for trans_name in translations:
-            verse_text = self.data_loader.get_verse_text(
-                trans_name, self.current_book, self.current_chapter, self.current_verse
-            )
-            if verse_text:
-                html_parts.append(f"<p><b>{trans_name}:</b><br>{verse_text}</p>")
+            data = self.data_loader.load_translation_data(trans_name)
+            direction_style = get_direction_style(data)
+            lines = []
+            for verse_num in range(start, end + 1):
+                verse_text = self.data_loader.get_verse_text(
+                    trans_name, self.current_book, self.current_chapter, verse_num
+                )
+                if verse_text:
+                    if start == end:
+                        lines.append(f"<div class='verse-line'>{html_escape(verse_text)}</div>")
+                    else:
+                        lines.append(
+                            f"<div class='verse-line'><span class='verse-number'>{verse_num}</span> "
+                            f"{html_escape(verse_text)}</div>"
+                        )
+
+            html_parts.append(f"<div class='translation' {direction_style}>")
+            html_parts.append(f"<div class='translation-title'>{html_escape(trans_name)}</div>")
+            if lines:
+                # 각 절이 이미 block(<div>)이므로 <br>로 이으면 빈 줄이 하나 더 생긴다.
+                html_parts.append("".join(lines))
             else:
-                html_parts.append(f"<p><b>{trans_name}:</b><br><i>(내용 없음)</i></p>")
+                html_parts.append("<i>(내용 없음)</i>")
+            html_parts.append("</div>")
         
+        html_parts.append("</body></html>")
         self.text_browser.setHtml("\n".join(html_parts))
 
     @Slot(int)
@@ -185,6 +224,7 @@ class ComparisonDialog(QDialog):
         new_verse = index + 1
         if self.current_verse != new_verse:
             self.current_verse = new_verse
+            self.end_verse = new_verse
             self.update_content()
 
     def go_to_adjacent_chapter(self, delta):

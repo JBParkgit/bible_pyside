@@ -7,6 +7,18 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, Slot, QUrl, QPoint, QSize, QTimer
 from PySide6.QtGui import QFont, QTextOption, QPalette, QTextCursor, QKeySequence, QKeyEvent, QIcon
 
+from html_utils import apply_text_layout, get_text_alignment, get_text_direction, html_escape
+
+
+HIGHLIGHT_COLORS = {
+    "yellow": ("노랑", "#fff59d"),
+    "green": ("초록", "#c8e6c9"),
+    "blue": ("파랑", "#bbdefb"),
+    "pink": ("분홍", "#f8bbd0"),
+}
+SELECTED_VERSE_COLOR = "#dbeafe"
+
+
 class CustomTextBrowser(QTextBrowser):
     def keyPressEvent(self, event: QKeyEvent):
         if event.matches(QKeySequence.StandardKey.Copy):
@@ -65,6 +77,8 @@ class SharedBibleView(QWidget):
     request_add_to_collection = Signal(object, str, str)
     request_send_to_word = Signal(str)
     request_send_to_powerpoint = Signal(object, str)
+    request_original_language = Signal(str, int, int, int)
+    request_ai_explanation = Signal(str, str, str)  # (참조, 본문, 번역본이름)
 
     def __init__(self, data_loader, available_translations, parent=None, initial_settings=None, is_main_reader=False, context='read', bible_db=None):
         super().__init__(parent)
@@ -76,6 +90,8 @@ class SharedBibleView(QWidget):
         self.current_book = "창세기"
         self.current_chapter = 1
         self.current_verse_for_context = 1
+        self.selected_verse_anchor = None
+        self.selected_verse_focus = None
         if initial_settings is None: initial_settings = {}
         self.verse_display_mode = initial_settings.get('verse_display_mode', 0)
         self.font_size = initial_settings.get('bible_font_size', 14)
@@ -132,15 +148,65 @@ class SharedBibleView(QWidget):
         
         layout.addWidget(control_bar)
         layout.addWidget(self.text_browser)
+        self.init_selection_bar(layout)
+
+    def init_selection_bar(self, layout):
+        self.selection_bar = QFrame()
+        self.selection_bar.setObjectName("selectionBar")
+        selection_layout = QHBoxLayout(self.selection_bar)
+        selection_layout.setContentsMargins(8, 6, 8, 6)
+        selection_layout.setSpacing(6)
+
+        self.selection_reference_label = QLabel()
+        self.selection_reference_label.setObjectName("selectionReferenceLabel")
+        selection_layout.addWidget(self.selection_reference_label)
+        selection_layout.addStretch(1)
+
+        self.selection_copy_button = QPushButton("복사")
+        self.selection_compare_button = QPushButton("비교")
+        self.selection_original_button = QPushButton("원어")
+        self.selection_ai_button = QPushButton("설명")
+        self.selection_ai_button.setToolTip("선택한 구절에 대한 AI 해설 보기 (Gemini)")
+        for button in [
+            self.selection_copy_button,
+            self.selection_compare_button,
+            self.selection_original_button,
+            self.selection_ai_button,
+        ]:
+            button.setFixedHeight(28)
+            selection_layout.addWidget(button)
+
+        self.highlight_color_buttons = {}
+        for key, (label, color) in HIGHLIGHT_COLORS.items():
+            button = QPushButton()
+            button.setFixedSize(28, 28)
+            button.setToolTip(f"{label} 하이라이트")
+            button.setStyleSheet(f"background-color: {color}; border: 1px solid #8c959f;")
+            self.highlight_color_buttons[key] = button
+            selection_layout.addWidget(button)
+
+        self.selection_clear_button = QPushButton("닫기")
+        self.selection_clear_button.setFixedHeight(28)
+        selection_layout.addWidget(self.selection_clear_button)
+
+        self.selection_bar.hide()
+        layout.addWidget(self.selection_bar)
 
     def connect_signals(self):
         self.translation_combo.currentTextChanged.connect(self.on_translation_changed)
         self.text_browser.verticalScrollBar().valueChanged.connect(self.scroll_changed.emit)
         self.text_browser.customContextMenuRequested.connect(self.show_context_menu)
-        self.text_browser.anchorClicked.connect(self.verse_anchor_clicked.emit)
+        self.text_browser.anchorClicked.connect(self.on_verse_anchor_clicked)
         self.text_browser.selectionChanged.connect(self.update_action_buttons_state)
         self.send_to_word_button.clicked.connect(self.trigger_send_to_word)
         self.send_to_ppt_button.clicked.connect(self.trigger_send_to_powerpoint)
+        self.selection_copy_button.clicked.connect(self.copy_selected_verses)
+        self.selection_compare_button.clicked.connect(self.open_selected_comparison)
+        self.selection_original_button.clicked.connect(self.open_selected_original_language)
+        self.selection_ai_button.clicked.connect(self.open_selected_ai_explanation)
+        self.selection_clear_button.clicked.connect(lambda: self.clear_verse_selection())
+        for key, button in self.highlight_color_buttons.items():
+            button.clicked.connect(lambda checked=False, color_key=key: self.set_selected_highlight_color(color_key))
 
     @Slot()
     def update_action_buttons_state(self):
@@ -150,6 +216,169 @@ class SharedBibleView(QWidget):
 
     def set_menu_stylesheet(self, stylesheet):
         self.menu_stylesheet = stylesheet
+
+    def _selected_verse_numbers(self):
+        if self.selected_verse_anchor is None or self.selected_verse_focus is None:
+            return []
+        start = min(self.selected_verse_anchor, self.selected_verse_focus)
+        end = max(self.selected_verse_anchor, self.selected_verse_focus)
+        return list(range(start, end + 1))
+
+    def _format_reference(self, verse_numbers, full=False):
+        """구절 번호 목록 → 참조 문자열.
+        full=True 이면 성경책 전체 이름(창세기), False 이면 약칭(창)을 쓴다.
+        - 1구절: '창세기 1:4'
+        - 인접 2구절: '창세기 1:4, 5'
+        - 3구절 이상: '창세기 1:4-7'
+        """
+        verse_numbers = sorted(v for v in verse_numbers if v)
+        if not verse_numbers:
+            return ""
+        if full:
+            book = self.data_loader.get_book_full_name(
+                self.current_book, translation_name=self.translation_combo.currentText())
+        else:
+            book = self.data_loader.get_book_abbr(
+                self.current_book, translation_name=self.translation_combo.currentText())
+        if len(verse_numbers) == 1:
+            verses = f"{verse_numbers[0]}"
+        elif len(verse_numbers) == 2:
+            verses = f"{verse_numbers[0]}, {verse_numbers[1]}"
+        else:
+            verses = f"{verse_numbers[0]}-{verse_numbers[-1]}"
+        return f"{book} {self.current_chapter}:{verses}"
+
+    def _selected_reference(self, full=False):
+        return self._format_reference(self._selected_verse_numbers(), full=full)
+
+    def _get_verses_only(self, translation=None):
+        translation = translation or self.translation_combo.currentText()
+        data = self.data_loader.load_translation_data(translation)
+        chapter_content = data["bible_data"].get(self.current_book, {}).get(str(self.current_chapter), [])
+        verses = [line for line in chapter_content if not re.match(r'<\s*(.+?)\s*>', line)]
+        return data, verses
+
+    def on_verse_anchor_clicked(self, url: QUrl):
+        verse_num = None
+        href = url.toString()
+        if href.startswith("#"):
+            href = href[1:]
+        try:
+            verse_num = int(href)
+        except (TypeError, ValueError):
+            pass
+
+        if verse_num:
+            self.current_verse_for_context = verse_num
+            if self.selected_verse_anchor == verse_num and self.selected_verse_focus == verse_num:
+                self.clear_verse_selection(update=False)
+            elif self.selected_verse_anchor is None:
+                self.selected_verse_anchor = verse_num
+                self.selected_verse_focus = verse_num
+            else:
+                self.selected_verse_focus = verse_num
+            self.update_selection_bar()
+            # 구절 선택 시 스크롤이 조금도 움직이지 않도록 재정렬을 끈다.
+            self.update_content(preserve_scroll=True, realign_verse=False)
+
+        self.verse_anchor_clicked.emit(url)
+
+    def clear_verse_selection(self, update=True):
+        self.selected_verse_anchor = None
+        self.selected_verse_focus = None
+        self.selection_bar.hide()
+        if update:
+            self.update_content(preserve_scroll=True, realign_verse=False)
+
+    def update_selection_bar(self):
+        selected = self._selected_verse_numbers()
+        if not selected:
+            self.selection_bar.hide()
+            return
+        self.selection_reference_label.setText(self._selected_reference(full=True))
+        self.selection_bar.show()
+
+    def _build_verse_text(self, verse_numbers):
+        """구절 번호 목록 → (참조 헤더 + 본문 텍스트, 참조 헤더)."""
+        verse_numbers = sorted(set(v for v in verse_numbers if v))
+        if not verse_numbers:
+            return None, None
+
+        _, verses = self._get_verses_only()
+        header = self._format_reference(verse_numbers, full=True)
+        lines = [header]
+        single = len(verse_numbers) == 1
+        for verse_num in verse_numbers:
+            if 0 <= verse_num - 1 < len(verses):
+                verse_text = verses[verse_num - 1]
+                if not verse_text:
+                    continue
+                lines.append(verse_text if single else f"{verse_num} {verse_text}")
+
+        return "\n".join(lines), header
+
+    def _build_selected_verse_text(self):
+        return self._build_verse_text(self._selected_verse_numbers())
+
+    def _show_selection_message(self, message):
+        self.selection_reference_label.setText(f"{self._selected_reference(full=True)} - {message}")
+        QTimer.singleShot(1800, self.update_selection_bar)
+
+    @Slot()
+    def copy_selected_verses(self):
+        text, _ = self._build_selected_verse_text()
+        if not text:
+            return
+        QApplication.clipboard().setText(text)
+        self._show_selection_message("복사됨")
+
+    @Slot()
+    def open_selected_comparison(self):
+        selected = self._selected_verse_numbers()
+        if not selected:
+            return
+        self.current_verse_for_context = selected[0]
+        self.open_comparison_view(selected[0], selected[-1])
+
+    @Slot()
+    def open_selected_original_language(self):
+        selected = self._selected_verse_numbers()
+        if not selected:
+            return
+        self.request_original_language.emit(self.current_book, self.current_chapter, selected[0], selected[-1])
+
+    def emit_ai_explanation_for(self, verse_numbers):
+        """주어진 구절 목록에 대한 AI 해설을 요청한다. (액션바·우클릭 공용)"""
+        text, header = self._build_verse_text(verse_numbers)
+        if not text:
+            return
+        passage = text.split("\n", 1)[1] if "\n" in text else text
+        self.request_ai_explanation.emit(header, passage, self.translation_combo.currentText())
+
+    @Slot()
+    def open_selected_ai_explanation(self):
+        self.emit_ai_explanation_for(self._selected_verse_numbers())
+
+    def set_selected_highlight_color(self, color_key):
+        selected = self._selected_verse_numbers()
+        if not selected or not self.bible_db:
+            return
+
+        _, color = HIGHLIGHT_COLORS.get(color_key, HIGHLIGHT_COLORS["yellow"])
+        all_same_color = all(
+            self.bible_db.is_highlighted(self.current_book, self.current_chapter, verse)
+            and self.bible_db.get_highlight_color(self.current_book, self.current_chapter, verse) == color
+            for verse in selected
+        )
+
+        for verse_num in selected:
+            if all_same_color:
+                self.bible_db.remove_highlight(self.current_book, self.current_chapter, verse_num)
+            else:
+                self.bible_db.add_highlight(self.current_book, self.current_chapter, verse_num, color)
+
+        self.update_content(preserve_scroll=True, realign_verse=False)
+        self.highlight_changed.emit()
 
     def set_font_family(self, font_name):
         self.font_family = font_name
@@ -171,11 +400,7 @@ class SharedBibleView(QWidget):
     def set_word_wrap_mode(self, translation_name):
         try:
             data = self.data_loader.load_translation_data(translation_name)
-            language = data.get('language', 'unknown')
-            if language in ['korean', 'chinese']:
-                self.text_browser.setWordWrapMode(QTextOption.WrapAnywhere)
-            else:
-                self.text_browser.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
+            apply_text_layout(self.text_browser, data)
         except Exception:
             self.text_browser.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
 
@@ -200,27 +425,14 @@ class SharedBibleView(QWidget):
         self.text_browser.setPalette(palette)
 
     def _get_highlight_color(self):
-        """테마에 맞는 하이라이트 색상 반환"""
-        if not self.bible_db:
-            return '#fff9c4'
-        
-        # MainWindow에서 현재 테마 확인
-        main_window = self.window()
-        if hasattr(main_window, '_settings'):
-            theme = main_window._settings.get('theme', 'Dark')
-        else:
-            theme = 'Dark'
-        
-        # 테마별 하이라이트 색상
-        theme_colors = {
-            'Light': '#fff9c4',    # 연한 노란색
-            'Dark': '#8b6914',     # 어두운 노란색
-            'Sepia': '#d4c5a9',    # 세피아 톤
-            'Gray': '#6a6a6a'       # 회색 계열
-        }
-        return theme_colors.get(theme, '#fff9c4')
+        return HIGHLIGHT_COLORS["yellow"][1]
     
-    def update_content(self, book=None, chapter=None, preserve_scroll=False):
+    def update_content(self, book=None, chapter=None, preserve_scroll=False, realign_verse=True):
+        if (book and book != self.current_book) or (chapter and chapter != self.current_chapter):
+            self.selected_verse_anchor = None
+            self.selected_verse_focus = None
+            if hasattr(self, "selection_bar"):
+                self.selection_bar.hide()
         if book: self.current_book = book
         if chapter: self.current_chapter = chapter
         translation = self.translation_combo.currentText()
@@ -228,83 +440,134 @@ class SharedBibleView(QWidget):
         
         # 스크롤 위치 저장 (하이라이트 업데이트 시 위치 유지)
         scroll_position = None
+        visible_verse = None
         if preserve_scroll:
             scroll_position = self.text_browser.verticalScrollBar().value()
-            # 현재 보이는 구절 번호도 저장 (더 정확한 복원을 위해)
-            cursor = self.text_browser.cursorForPosition(QPoint(10, self.text_browser.viewport().height() // 2))
-            href = cursor.charFormat().anchorHref()
-            visible_verse = None
-            if href and href.startswith('#'):
-                try:
-                    visible_verse = int(href[1:])
-                except (ValueError, IndexError):
-                    pass
+            # 현재 보이는 구절 번호도 저장 (더 정확한 복원을 위해).
+            # 단, 구절 선택/하이라이트처럼 스크롤이 조금도 움직이면 안 되는 경우엔
+            # realign_verse=False 로 호출해서 구절 재정렬을 건너뛴다.
+            if realign_verse:
+                cursor = self.text_browser.cursorForPosition(QPoint(10, self.text_browser.viewport().height() // 2))
+                href = cursor.charFormat().anchorHref()
+                if href and href.startswith('#'):
+                    try:
+                        visible_verse = int(href[1:])
+                    except (ValueError, IndexError):
+                        pass
         
         try:
             data = self.data_loader.load_translation_data(translation)
             chapter_content = data["bible_data"].get(self.current_book, {}).get(str(self.current_chapter), [])
+            apply_text_layout(self.text_browser, data)
         except Exception as e:
-            self.text_browser.setHtml(f"<p style='color:red;'>'{translation}' 로드 중 오류 발생:<br>{e}</p>")
+            self.text_browser.setHtml(f"<p style='color:red;'>'{html_escape(translation)}' 로드 중 오류 발생:<br>{html_escape(e)}</p>")
             return
         if not chapter_content:
-            self.text_browser.setHtml(f"<p>'{self.current_book} {self.current_chapter}장' 데이터를 찾을 수 없습니다.</p>")
+            self.text_browser.setHtml(f"<p>'{html_escape(self.current_book)} {self.current_chapter}장' 데이터를 찾을 수 없습니다.</p>")
             return
         
         html_content, verse_counter = [], 1
-        book_abbr = self.data_loader.full_name_to_abbr_map.get(self.current_book, "")
+        book_abbr = self.data_loader.get_book_abbr(self.current_book, language=data.get('language'))
         text_color_name = QApplication.palette().color(QPalette.ColorRole.Text).name()
+        direction = get_text_direction(data)
+        text_align = get_text_alignment(data)
+        prefix_padding = "padding-left: 5px;" if direction == "rtl" else "padding-right: 5px;"
         
-        # 하이라이트된 구절 목록 가져오기
-        highlighted_verses = set()
+        highlight_color_map = {}
         if self.bible_db:
             highlights = self.bible_db.get_highlights(self.current_book, self.current_chapter)
-            highlighted_verses = {h['verse'] for h in highlights}
-        
-        highlight_color = self._get_highlight_color()
+            highlight_color_map = {
+                h["verse"]: h.get("color") or self._get_highlight_color()
+                for h in highlights
+            }
+        selected_verses = set(self._selected_verse_numbers())
         
         # CSS 스타일 추가: 링크와 일반 텍스트의 폰트 굵기를 일치시키기
-        html_content.append(f"<style>a {{ font-weight: normal !important; }} td {{ font-weight: normal !important; }} table {{ font-weight: normal !important; }}</style>")
+        html_content.append(
+            "<style>"
+            "a { font-weight: normal !important; } "
+            "td { font-weight: normal !important; } "
+            "table { font-weight: normal !important; } "
+            f"body {{ direction: {direction}; }}"
+            "</style>"
+        )
         
         is_after_subtitle = False
 
-        for line in chapter_content:
-            subtitle_match = re.match(r'<\s*(.+?)\s*>', line)
+        subtitle_re = re.compile(r'<\s*(.+?)\s*>')
+        items = list(chapter_content)
+        n_items = len(items)
+        idx = 0
+        while idx < n_items:
+            line = items[idx]
+            subtitle_match = subtitle_re.match(line)
             if subtitle_match:
-                html_content.append(f"<p style='text-align:center; font-weight:bold; color:{text_color_name}; margin-top:15px; margin-bottom:10px;'>{subtitle_match.group(1)}</p>")
+                html_content.append(f"<p style='text-align:center; font-weight:bold; color:{text_color_name}; margin-top:15px; margin-bottom:10px;'>{html_escape(subtitle_match.group(1))}</p>")
                 is_after_subtitle = True
+                idx += 1
+                continue
+
+            start_verse = verse_counter
+            # 뒤따르는 빈 절(다른 번역본과 번호를 맞추려고 넣은 자리)을 이 절의
+            # 번호 범위에 흡수한다. 소제목은 넘지 않는다.
+            span = 1
+            if line.strip():
+                j = idx + 1
+                while j < n_items and not subtitle_re.match(items[j]) and items[j].strip() == "":
+                    span += 1
+                    j += 1
+            end_verse = start_verse + span - 1
+            num_label = f"{start_verse}" if start_verse == end_verse else f"{start_verse}-{end_verse}"
+
+            safe_book_abbr = html_escape(book_abbr)
+            if self.verse_display_mode == 0:
+                verse_prefix = f"<span style='color: {text_color_name}; font-weight: normal;'>({safe_book_abbr} {self.current_chapter}:{num_label})</span>"
+            elif self.verse_display_mode == 1:
+                verse_prefix = f"<span style='color: {text_color_name}; font-weight: normal;'>{safe_book_abbr} {self.current_chapter}:{num_label}</span>"
             else:
-                verse_prefix = ""
-                if self.verse_display_mode == 0: verse_prefix = f"<span style='color: {text_color_name}; font-weight: normal;'>({book_abbr} {self.current_chapter}:{verse_counter})</span>"
-                elif self.verse_display_mode == 1: verse_prefix = f"<span style='color: {text_color_name}; font-weight: normal;'>{book_abbr} {self.current_chapter}:{verse_counter}</span>"
-                elif self.verse_display_mode == 2: verse_prefix = f"<span style='color: {text_color_name}; font-weight: normal;'>{verse_counter}.</span>"
-                
-                margin_top_style = ""
-                if is_after_subtitle:
-                    margin_top_style = "margin-top: 25px;"
-                    is_after_subtitle = False
-                
-                # 하이라이트 배경색 적용
-                bg_color_style = ""
-                if verse_counter in highlighted_verses:
-                    bg_color_style = f"background-color: {highlight_color};"
-                
-                # <<< 수정됨: 하이라이트 배경색 추가
-                verse_html = f"""
-                <table style="border-collapse: collapse; margin-bottom: 8px; font-weight: normal; {margin_top_style}">
-                    <tr>
-                        <td style="width: 1px; white-space: nowrap; padding-right: 5px; vertical-align: top; font-weight: normal; {bg_color_style}">
-                            <a href='#{verse_counter}' style='text-decoration:none; color:{text_color_name}; font-weight: normal !important;'>{verse_prefix}</a>
-                        </td>
-                        <td style="vertical-align: top; line-height: 1.2; font-weight: normal; {bg_color_style}">
-                            <a href='#{verse_counter}' style='text-decoration:none; color:{text_color_name}; font-weight: normal !important;'>{line}</a>
-                        </td>
-                    </tr>
-                </table>
-                """
-                # --- 수정 끝
-                html_content.append(verse_html)
-                
-                verse_counter += 1
+                verse_prefix = f"<span style='color: {text_color_name}; font-weight: normal;'>{num_label}.</span>"
+
+            margin_top_style = ""
+            if is_after_subtitle:
+                margin_top_style = "margin-top: 25px;"
+                is_after_subtitle = False
+
+            # 하이라이트/선택 배경색 (범위 내 아무 절이나 해당되면 적용)
+            verse_span = range(start_verse, end_verse + 1)
+            bg_color_style = ""
+            if any(v in selected_verses for v in verse_span):
+                bg_color_style = f"background-color: {SELECTED_VERSE_COLOR};"
+            else:
+                hl = next((highlight_color_map[v] for v in verse_span if v in highlight_color_map), None)
+                if hl:
+                    bg_color_style = f"background-color: {hl};"
+
+            # QTextBrowser(Qt 리치텍스트)는 CSS width:100% / direction 을 무시한다.
+            # - 테이블 width 는 HTML 속성으로 준다.
+            # - 구절번호 칸은 width="1" + nowrap 으로 내용 크기만큼만 차지하게 한다.
+            # - RTL 은 셀 순서를 뒤집고 본문을 오른쪽 정렬한다.
+            safe_line = html_escape(line) or "&nbsp;"
+            num_cell = (
+                f'<td width="1" style="white-space: nowrap; {prefix_padding} vertical-align: top; font-weight: normal; {bg_color_style}">'
+                f"<a href='#{start_verse}' style='text-decoration:none; color:{text_color_name}; font-weight: normal !important;'>{verse_prefix}</a>"
+                "</td>"
+            )
+            align_attr = ' align="right"' if direction == "rtl" else ""
+            text_cell = (
+                f'<td{align_attr} dir="{direction}" style="vertical-align: top; line-height: 1.35; font-weight: normal; {bg_color_style}">'
+                f"<a href='#{start_verse}' style='text-decoration:none; color:{text_color_name}; font-weight: normal !important;'>{safe_line}</a>"
+                "</td>"
+            )
+            cells = f"{text_cell}{num_cell}" if direction == "rtl" else f"{num_cell}{text_cell}"
+            verse_html = (
+                f'<table width="100%" border="0" cellspacing="0" cellpadding="0" '
+                f'style="border-collapse: collapse; margin-bottom: 8px; font-weight: normal; {margin_top_style}">'
+                f"<tr>{cells}</tr></table>"
+            )
+            html_content.append(verse_html)
+
+            verse_counter += span
+            idx += span
                 
         # 하이라이트 업데이트 시 깜박임 최소화
         if preserve_scroll and scroll_position is not None:
@@ -317,6 +580,14 @@ class SharedBibleView(QWidget):
             self.text_browser.setHtml("".join(html_content))
         
         # 스크롤 위치 복원
+        if preserve_scroll and scroll_position is not None and not realign_verse:
+            # 선택/하이라이트 재렌더: 본문 높이가 사실상 동일하므로 재정렬 없이
+            # 정확히 같은 스크롤 위치로 즉시 복원한다. (retry/QTimer 없이)
+            scrollbar = self.text_browser.verticalScrollBar()
+            scrollbar.setValue(scroll_position)
+            QTimer.singleShot(0, lambda pos=scroll_position: scrollbar.setValue(pos))
+            return
+
         if preserve_scroll and scroll_position is not None:
             # QTimer를 사용하여 HTML 렌더링 완료 후 스크롤 위치 복원
             # 여러 번 시도하여 확실하게 복원
@@ -387,7 +658,8 @@ class SharedBibleView(QWidget):
         if final_processed_lines:
             first_verse = get_verse_num_from_line(final_processed_lines[0])
             last_verse = get_verse_num_from_line(final_processed_lines[-1]) if len(final_processed_lines) > 1 else first_verse
-            book_abbr = self.data_loader.full_name_to_abbr_map.get(self.current_book, "")
+            book_abbr = self.data_loader.get_book_abbr(
+                self.current_book, translation_name=self.translation_combo.currentText())
             if first_verse:
                 if not last_verse or first_verse == last_verse:
                     range_str = f"{book_abbr} {self.current_chapter}:{first_verse}"
@@ -511,6 +783,9 @@ class SharedBibleView(QWidget):
             compare_action = menu.addAction("번역본 비교")
             compare_action.triggered.connect(self.open_comparison_view)
 
+            ai_action = menu.addAction("이 절 AI 해설")
+            ai_action.triggered.connect(lambda: self.emit_ai_explanation_for([verse_num]))
+
             if self.context == 'commentary': c_action.setEnabled(False)
             elif self.context == 'crossref': cr_action.setEnabled(False)
             c_action.triggered.connect(lambda: self.request_commentary.emit(self.current_book, self.current_chapter, self.current_verse_for_context))
@@ -549,6 +824,8 @@ class SharedBibleView(QWidget):
                     range_highlight_action = menu.addAction(f"선택 범위 하이라이트 추가 ({len(selected_verses)}개 구절)")
                 
                 range_highlight_action.triggered.connect(lambda: self.toggle_highlight_range(selected_verses))
+                ai_range_action = menu.addAction(f"선택 범위 AI 해설 ({len(selected_verses)}개 구절)")
+                ai_range_action.triggered.connect(lambda: self.emit_ai_explanation_for(selected_verses))
                 menu.addSeparator()
         
         copy_action = menu.addAction("복사하기 (Ctrl+C)")
@@ -577,10 +854,11 @@ class SharedBibleView(QWidget):
         menu.exec(self.text_browser.mapToGlobal(pos))
     
     @Slot()
-    def open_comparison_view(self):
+    def open_comparison_view(self, start_verse=None, end_verse=None):
         from comparison_view import ComparisonDialog
         
-        if not hasattr(self, 'current_verse_for_context') or not self.current_verse_for_context:
+        verse_to_open = start_verse or getattr(self, 'current_verse_for_context', None)
+        if not verse_to_open:
             return
 
         main_window = self.window()
@@ -596,11 +874,12 @@ class SharedBibleView(QWidget):
             self.data_loader,
             self.current_book,
             self.current_chapter,
-            self.current_verse_for_context,
+            verse_to_open,
             self,
             stylesheet=stylesheet,
             font_family=self.font_family,
-            font_size=comparison_font_size 
+            font_size=comparison_font_size,
+            end_verse=end_verse or verse_to_open,
         )
         
         if hasattr(main_window, 'on_comparison_font_size_changed'):
@@ -633,8 +912,8 @@ class SharedBibleView(QWidget):
         
         highlight_color = self._get_highlight_color()
         self.bible_db.toggle_highlight(self.current_book, self.current_chapter, verse_num, highlight_color)
-        # 화면 갱신 (스크롤 위치 유지)
-        self.update_content(preserve_scroll=True)
+        # 화면 갱신 (스크롤 위치 정확히 유지 - 구절 재정렬 안 함)
+        self.update_content(preserve_scroll=True, realign_verse=False)
         self.highlight_changed.emit()
     
     def toggle_highlight_range(self, verse_numbers: list):
@@ -657,8 +936,8 @@ class SharedBibleView(QWidget):
             for verse_num in verse_numbers:
                 self.bible_db.add_highlight(self.current_book, self.current_chapter, verse_num, highlight_color)
         
-        # 화면 갱신 (스크롤 위치 유지)
-        self.update_content(preserve_scroll=True)
+        # 화면 갱신 (스크롤 위치 정확히 유지 - 구절 재정렬 안 함)
+        self.update_content(preserve_scroll=True, realign_verse=False)
         self.highlight_changed.emit()
 
     @Slot(int)
@@ -675,8 +954,9 @@ class SharedBibleView(QWidget):
                 except Exception as e:
                     print(f"소제목 확인 중 오류 발생: {e}")
 
-        book_abbr = self.data_loader.full_name_to_abbr_map.get(self.current_book, "")
-        
+        book_abbr = self.data_loader.get_book_abbr(
+            self.current_book, translation_name=self.translation_combo.currentText())
+
         prefix_to_find = ""
         if self.verse_display_mode == 0:
             prefix_to_find = f"({book_abbr} {self.current_chapter}:{verse_num})"
@@ -694,5 +974,9 @@ class SharedBibleView(QWidget):
             cursor_rect = self.text_browser.cursorRect()
             scrollbar = self.text_browser.verticalScrollBar()
             scrollbar.setValue(scrollbar.value() + cursor_rect.top())
+            # find() 가 남기는 선택 음영을 제거한다 (구절 표시에 회색 배경이 남는 문제)
+            cursor = self.text_browser.textCursor()
+            cursor.setPosition(cursor.selectionStart())
+            self.text_browser.setTextCursor(cursor)
         else:
             print(f"경고: 스크롤할 구절의 접두사 '{prefix_to_find}'를 찾지 못했습니다.")
