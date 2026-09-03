@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QFontDialog, QDialog, QGridLayout, QFileDialog, QToolBar, QSizePolicy,
     QTabBar, QSlider
 )
-from PySide6.QtCore import Qt, Signal, Slot, QEvent, QTimer
+from PySide6.QtCore import Qt, Signal, Slot, QEvent, QTimer, QSize
 from PySide6.QtGui import (
     QFont, QCloseEvent, QPalette, QAction, QActionGroup, QTextOption,
     QFontDatabase, QIcon, QKeySequence, QShortcut, QColor, QPainter, QPen
@@ -44,6 +44,10 @@ from ai_explain import (
 
 
 import qdarktheme
+
+from ui_theme import TOKENS, office_qss, resolve_mode, themed_icon
+from body_style import body_style_from_settings, body_style_to_settings
+from body_style_dialog import BodyStyleDialog
 
 class CloseButton(QWidget):
     clicked = Signal()
@@ -564,6 +568,7 @@ class MainWindow(QMainWindow):
         self.setGeometry(100, 100, 1200, 800)
         self._settings = self.load_settings()
         self.font_family = self._settings.get('font_family', 'Malgun Gothic')
+        self._body_style = body_style_from_settings(self._settings)
         # 비교창 폰트 크기 로드
         self.comparison_font_size = self._settings.get('comparison_font_size', 12)
         self.pending_scroll_info = None
@@ -629,7 +634,7 @@ class MainWindow(QMainWindow):
         self.commentary_tab.update_all_content(self.current_book, self.current_chapter, 1)
         self.crossref_tab.update_all_content(self.current_book, self.current_chapter, 1)
         self.original_language_tab.update_all_content(self.current_book, self.current_chapter, 1)
-        self.apply_theme(self._settings.get('theme', 'Dark'))
+        self.apply_theme(self._settings.get('theme', 'Light'))
 
         self.add_to_history(self.current_book, self.current_chapter, 1)
 
@@ -651,7 +656,8 @@ class MainWindow(QMainWindow):
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, self.main_toolbar)
 
         self.tab_widget = QTabWidget()
-        
+        self.tab_widget.setDocumentMode(True)
+
         corner_widget = self.create_tab_corner_widget()
         self.tab_widget.setCornerWidget(corner_widget, Qt.Corner.TopRightCorner)
 
@@ -699,23 +705,45 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(self.tab_widget)
 
+    def _toolbar_vsep(self):
+        sep = QFrame()
+        sep.setObjectName("vsep")
+        sep.setFrameShape(QFrame.Shape.NoFrame)
+        sep.setFixedWidth(1)
+        return sep
+
     def create_main_toolbar(self):
         main_toolbar = QToolBar("Main Toolbar")
+        main_toolbar.setObjectName("mainToolBar")
         main_toolbar.setMovable(False)
         main_toolbar.setFloatable(False)
 
-        self.prev_book_btn = QPushButton("<<")
-        self.prev_chap_btn = QPushButton("<")
+        self.prev_book_btn = QPushButton()
+        self.prev_chap_btn = QPushButton()
         self.location_btn = QPushButton()
-        self.location_btn.setFixedWidth(140)
-        self.next_chap_btn = QPushButton(">")
-        self.next_book_btn = QPushButton(">>")
+        self.location_btn.setObjectName("locationButton")
+        self.location_btn.setFixedWidth(160)
+        self.next_chap_btn = QPushButton()
+        self.next_book_btn = QPushButton()
         self.nav_input = QLineEdit()
         self.nav_input.setMaximumWidth(90)
         self.go_btn = QPushButton("이동")
 
-        self.history_back_btn = QPushButton("←")
-        self.history_forward_btn = QPushButton("→")
+        self.history_back_btn = QPushButton()
+        self.history_forward_btn = QPushButton()
+
+        # 테마에 따라 다시 칠할 아이콘 버튼 등록: (버튼, svg 이름)
+        self._toolbar_icon_buttons = [
+            (self.prev_book_btn, "chevrons-left"),
+            (self.prev_chap_btn, "chevron-left"),
+            (self.next_chap_btn, "chevron-right"),
+            (self.next_book_btn, "chevrons-right"),
+            (self.history_back_btn, "arrow-undo"),
+            (self.history_forward_btn, "arrow-redo"),
+        ]
+        for btn, _name in self._toolbar_icon_buttons:
+            btn.setProperty("iconButton", "true")
+            btn.setIconSize(QSize(16, 16))
 
         self.prev_chap_btn.setShortcut(QKeySequence("F8"))
         self.next_chap_btn.setShortcut(QKeySequence("F9"))
@@ -732,25 +760,17 @@ class MainWindow(QMainWindow):
         self.go_btn.setToolTip("입력한 곳으로 이동")
         self.history_back_btn.setToolTip("이전 읽기 위치로 (Ctrl+F8, 길게 누르면 목록 표시)")
         self.history_forward_btn.setToolTip("다음 읽기 위치로 (Ctrl+F9, 길게 누르면 목록 표시)")
-        
-        self.prev_book_btn.setFixedSize(34, 30)
-        self.prev_chap_btn.setFixedSize(34, 30)
-        self.next_chap_btn.setFixedSize(34, 30)
-        self.next_book_btn.setFixedSize(34, 30)
-        
+
         main_toolbar.addWidget(self.prev_book_btn)
         main_toolbar.addWidget(self.prev_chap_btn)
         main_toolbar.addWidget(self.location_btn)
         main_toolbar.addWidget(self.next_chap_btn)
         main_toolbar.addWidget(self.next_book_btn)
+        main_toolbar.addWidget(self._toolbar_vsep())
         main_toolbar.addWidget(self.nav_input)
         main_toolbar.addWidget(self.go_btn)
 
-        # '이동' 버튼과 '뒤로 가기' 버튼 사이에 세로 구분선 추가
-        separator = QFrame()
-        separator.setFrameShape(QFrame.Shape.VLine)
-        separator.setFrameShadow(QFrame.Shadow.Sunken)
-        main_toolbar.addWidget(separator)
+        main_toolbar.addWidget(self._toolbar_vsep())
 
         main_toolbar.addWidget(self.history_back_btn)
         main_toolbar.addWidget(self.history_forward_btn)
@@ -763,8 +783,13 @@ class MainWindow(QMainWindow):
         self.search_translation_combo.addItems(self.data_loader.get_available_translations())
         self.search_input = QLineEdit()
         self.search_input.setMaximumWidth(250)
+        self.search_input.setClearButtonEnabled(True)
+        self._search_input_action = self.search_input.addAction(
+            themed_icon("search", TOKENS[resolve_mode(self._settings.get('theme', 'Light'))]["text_secondary"]),
+            QLineEdit.ActionPosition.LeadingPosition,
+        )
         self.search_btn = QPushButton("검색")
-        
+
         self.search_input.setToolTip("검색어 입력 후 엔터 (Ctrl+F)")
         self.search_input.setPlaceholderText("검색 (Ctrl+F)")
         self.search_btn.setToolTip("입력한 내용 검색")
@@ -772,8 +797,20 @@ class MainWindow(QMainWindow):
         main_toolbar.addWidget(self.search_translation_combo)
         main_toolbar.addWidget(self.search_input)
         main_toolbar.addWidget(self.search_btn)
-        
+
         return main_toolbar
+
+    def _refresh_toolbar_icons(self):
+        """현재 테마 색으로 툴바 아이콘을 다시 칠한다."""
+        mode = getattr(self, "_theme_mode", None) or resolve_mode(self._settings.get('theme', 'Light'))
+        color = TOKENS[mode]["text_secondary"]
+        for btn, name in getattr(self, "_toolbar_icon_buttons", []):
+            btn.setIcon(themed_icon(name, color))
+        if hasattr(self, "location_btn"):
+            self.location_btn.setIcon(themed_icon("book", color))
+            self.location_btn.setIconSize(QSize(16, 16))
+        if hasattr(self, "_search_input_action") and self._search_input_action is not None:
+            self._search_input_action.setIcon(themed_icon("search", color))
 
 
     def create_tab_corner_widget(self):
@@ -825,8 +862,9 @@ class MainWindow(QMainWindow):
         self.theme_action_group = QActionGroup(self)
         self.theme_action_group.setExclusive(True)
         
-        themes = ["Light", "Dark", "Sepia", "Gray"]
-        current_theme = self._settings.get('theme', 'Dark')
+        themes = ["Light", "Dark"]
+        # 예전 Sepia/Gray 설정값은 Light/Dark 로 이관
+        current_theme = 'Dark' if resolve_mode(self._settings.get('theme', 'Light')) == 'dark' else 'Light'
         for theme_name in themes:
             action = QAction(theme_name, self, checkable=True)
             self.theme_action_group.addAction(action)
@@ -849,6 +887,9 @@ class MainWindow(QMainWindow):
         
         self.font_settings_action = QAction("폰트 및 글자 크기 설정...", self)
         settings_menu.addAction(self.font_settings_action)
+
+        self.body_style_action = QAction("본문 보기 설정...", self)
+        settings_menu.addAction(self.body_style_action)
 
         self.ai_settings_action = QAction("AI 설명 설정 (Gemini)...", self)
         settings_menu.addAction(self.ai_settings_action)
@@ -896,6 +937,7 @@ class MainWindow(QMainWindow):
 
         self.theme_action_group.triggered.connect(self.on_theme_action_triggered)
         self.font_settings_action.triggered.connect(self.open_font_settings_dialog)
+        self.body_style_action.triggered.connect(self.open_body_style_dialog)
         self.ai_settings_action.triggered.connect(self.open_ai_settings_dialog)
         self.extract_action.triggered.connect(self.open_text_extractor)
         self.read_mode_btn.clicked.connect(self.open_read_mode)
@@ -1114,6 +1156,61 @@ class MainWindow(QMainWindow):
             
             self.save_settings()
 
+    def _body_style_sample_verses(self):
+        """현재 읽고 있는 본문 앞부분을 미리보기 표본으로 만든다 (실패 시 None)."""
+        try:
+            views = self.read_tab.get_bible_views()
+            if not views:
+                return None
+            translation = views[0].translation_combo.currentText()
+            data = self.data_loader.load_translation_data(translation)
+            lines = data["bible_data"].get(self.current_book, {}).get(str(self.current_chapter), [])
+            if not lines:
+                return None
+            import re as _re
+            sub_re = _re.compile(r'<\s*(.+?)\s*>')
+            out, num = [], 1
+            for raw in lines:
+                m = sub_re.match(raw)
+                if m:
+                    out.append({"kind": "subtitle", "text": m.group(1)})
+                    continue
+                if raw.strip():
+                    out.append({"kind": "verse", "num": num, "text": raw})
+                num += 1
+                if sum(1 for x in out if x["kind"] == "verse") >= 5:
+                    break
+            return out or None
+        except Exception:
+            return None
+
+    def open_body_style_dialog(self):
+        t = getattr(self, '_theme_tokens', None) or TOKENS['light']
+        colors = {
+            "text": t["text"], "muted": t["text_secondary"],
+            "accent": t["accent"], "bg": t["surface"],
+        }
+        views = self.read_tab.get_bible_views()
+        font_pt = views[0].font_size if views else self._settings.get('bible_font_size', 14)
+        dialog = BodyStyleDialog(
+            current_style=getattr(self, '_body_style', None) or body_style_from_settings(self._settings),
+            sample_verses=self._body_style_sample_verses(),
+            colors=colors,
+            font_family=self.font_family,
+            font_pt=font_pt,
+            parent=self,
+        )
+        dialog.applied.connect(self._apply_body_style)
+        dialog.exec()
+
+    @Slot(dict)
+    def _apply_body_style(self, style):
+        self._body_style = dict(style)
+        for view in self._all_bible_views():
+            if hasattr(view, 'apply_body_style'):
+                view.apply_body_style(style)
+        self.save_settings()
+
     # --- AI 설명 (Gemini) ---------------------------------------------------
     def open_ai_settings_dialog(self):
         dialog = AiSettingsDialog(
@@ -1305,265 +1402,75 @@ class MainWindow(QMainWindow):
         self.save_settings()
 
     def apply_theme(self, theme_name: str):
-        # 테마 설정 저장 (하이라이트 색상 업데이트를 위해)
-        self._settings['theme'] = theme_name
-        
-        primary_color = ""
-        base_theme_name = 'light'
-
-        if theme_name == 'Dark':
-            base_theme_name = 'dark'
-            primary_color = "#5893d3"
-        elif theme_name == 'Sepia':
-            base_theme_name = 'light'
-            primary_color = "#a88665"
-        elif theme_name == 'Gray':
-            base_theme_name = 'dark'
-            primary_color = "#9e9e9e"
-        else: # Light
-            base_theme_name = 'light'
-            primary_color = "#3085d6"
+        """Office(Fluent) 스타일 테마 적용. Light / Dark 두 가지만 지원한다."""
+        mode = resolve_mode(theme_name)            # 'light' | 'dark'
+        canonical = 'Dark' if mode == 'dark' else 'Light'
+        self._settings['theme'] = canonical
+        self._theme_mode = mode
+        t = TOKENS[mode]
+        self._theme_tokens = t
 
         qdarktheme.setup_theme(
-            theme=base_theme_name,
-            custom_colors={"primary": primary_color}
+            theme=mode,
+            corner_shape="rounded",
+            custom_colors={
+                "primary": t["accent"],
+                "background": t["window"],
+                "border": t["border"],
+                "foreground": t["text"],
+                "input.background": t["surface"],
+            },
+            additional_qss=office_qss(mode),
         )
-        
+
         palette = QApplication.palette()
-        focus_border_color = primary_color
-        bar_stylesheet = ""
-        corner_stylesheet = ""
-        tab_stylesheet = ""
-        memo_btn_stylesheet = ""
-        text_color = ""
-        menu_stylesheet = ""
-        add_btn_stylesheet = ""
-        # [추가] 탭 내부 컨트롤(버튼 등)을 위한 공용 스타일시트 변수
-        in_tab_control_stylesheet = ""
-
-        if theme_name == 'Sepia':
-            highlight_color = QColor("#d9c89b")
-            highlighted_text_color = QColor("#5b4636")
-            text_color = "#5b4636"; base_bg = "#fbf0d9"; ui_bg = "#e9decb"; hover_bg = "#d9c89b"; border_color = "#c8b88a"
-            palette.setColor(QPalette.Base, QColor(base_bg))
-            palette.setColor(QPalette.ColorRole.Window, QColor(base_bg))
-            bar_stylesheet = f"""QToolBar {{ background-color: {ui_bg}; border-bottom: 1px solid {border_color}; padding: 2px; spacing: 4px; }} QToolBar QPushButton {{ border: 1px solid {border_color}; border-radius: 4px; background-color: {ui_bg}; color: {text_color}; min-height: 24px; padding: 0 8px; }} QToolBar QPushButton:hover {{ background-color: {hover_bg}; }} QToolBar QPushButton:pressed {{ background-color: {ui_bg}; }} QToolBar QLineEdit, QToolBar QComboBox {{ border: 1px solid {border_color}; border-radius: 4px; background-color: #ffffff; color: {text_color}; min-height: 24px; padding: 0 5px; }} QToolBar QLabel {{ color: {text_color}; }}"""
-            corner_stylesheet = f"""QWidget#CornerWidget {{ background-color: transparent; }} QPushButton {{ border: 1px solid {border_color}; background-color: {ui_bg}; color: {text_color}; }} QPushButton:hover {{ background-color: {hover_bg}; }}"""
-            tab_stylesheet = f"""QTabWidget::pane {{ border-top: 1px solid {border_color}; background: {base_bg}; }} QTabBar {{ border-bottom: 1px solid {border_color}; }} QTabBar::tab {{ background-color: {ui_bg}; color: {text_color}; border: 1px solid {border_color}; border-bottom: none; padding: 6px 16px; border-top-left-radius: 7px; border-top-right-radius: 7px; margin-right: 2px; }} QTabBar::tab:!selected {{ margin-top: 3px; }} QTabBar::tab:!selected:hover {{ background-color: {hover_bg}; }} QTabBar::tab:selected {{ margin-left: -2px; margin-right: -2px; margin-top: 0px; margin-bottom: -1px; background-color: {base_bg}; }}"""
-            memo_btn_stylesheet = f"""QPushButton#MemoTabGoToChapterButton, QPushButton#MemoTabSaveChapterButton, QPushButton#MemoTabSaveBookButton {{ border: 1px solid {border_color}; border-radius: 4px; background-color: {ui_bg}; color: {text_color}; padding: 2px 8px; }} QPushButton#MemoTabGoToChapterButton:hover, QPushButton#MemoTabSaveChapterButton:hover, QPushButton#MemoTabSaveBookButton:hover {{ background-color: {hover_bg}; }}"""
-            menu_stylesheet = f"""QMenu {{ background-color: {ui_bg}; border: 1px solid {border_color}; color: {text_color}; }} QMenu::item:selected {{ background-color: {hover_bg}; }} QMenu::item:disabled {{ color: #a08f82; }} QMenu::separator {{ height: 1px; background: {border_color}; margin-left: 5px; margin-right: 5px; }}"""
-            add_btn_stylesheet = f"""QPushButton#AddTabButton {{ border: 1px solid {border_color}; background-color: {ui_bg}; color: {text_color}; }} QPushButton#AddTabButton:hover {{ background-color: {hover_bg}; }}"""
-            in_tab_control_stylesheet = f"""
-                QPushButton {{ 
-                    border: 1px solid {border_color}; 
-                    background-color: {ui_bg}; 
-                    color: {text_color}; 
-                    border-radius: 4px; padding: 2px 5px; 
-                }}
-                QPushButton:hover {{ 
-                    background-color: {hover_bg}; 
-                }}
-                QRadioButton {{
-                    color: {text_color};
-                    background-color: transparent;
-                    border: none;
-                }}
-                QRadioButton::indicator {{
-                    width: 14px;
-                    height: 14px;
-                    border: 1px solid {border_color};
-                    border-radius: 8px;
-                }}
-                QRadioButton::indicator:hover {{
-                    border: 1px solid {hover_bg};
-                }}
-                QRadioButton::indicator:checked {{
-                    background-color: {primary_color};
-                    border: 2px solid {border_color};
-                }}
-                QRadioButton::indicator:unchecked {{
-                    background-color: transparent;
-                }}
-            """
-
-        elif theme_name == 'Gray':
-            highlight_color = QColor("#6a6a6a")
-            highlighted_text_color = QColor("#e0e0e0")
-            text_color = "#e0e0e0"; base_bg = "#4a4a4a"; ui_bg = "#5a5a5a"; hover_bg = "#6a6a6a"; border_color = "#3a3a3a"
-            palette.setColor(QPalette.Base, QColor(base_bg))
-            palette.setColor(QPalette.ColorRole.Window, QColor(base_bg))
-            bar_stylesheet = f"""QToolBar {{ background-color: {ui_bg}; border-bottom: 1px solid {border_color}; padding: 2px; spacing: 4px; }} QToolBar QPushButton {{ border: 1px solid {border_color}; border-radius: 4px; background-color: {ui_bg}; color: {text_color}; min-height: 24px; padding: 0 8px; }} QToolBar QPushButton:hover {{ background-color: {hover_bg}; }} QToolBar QPushButton:pressed {{ background-color: {ui_bg}; }} QToolBar QLineEdit, QToolBar QComboBox {{ border: 1px solid {border_color}; border-radius: 4px; background-color: #6a6a6a; color: {text_color}; min-height: 24px; padding: 0 5px; }} QToolBar QLabel {{ color: {text_color}; }}"""
-            corner_stylesheet = f"""QWidget#CornerWidget {{ background-color: transparent; }} QPushButton {{ border: 1px solid {border_color}; background-color: {ui_bg}; color: {text_color}; }} QPushButton:hover {{ background-color: {hover_bg}; }}"""
-            tab_stylesheet = f"""QTabWidget::pane {{ border-top: 1px solid {border_color}; background: {base_bg}; }} QTabBar {{ border-bottom: 1px solid {border_color}; }} QTabBar::tab {{ background-color: {ui_bg}; color: {text_color}; border: 1px solid {border_color}; border-bottom: none; padding: 6px 16px; border-top-left-radius: 7px; border-top-right-radius: 7px; margin-right: 2px; }} QTabBar::tab:!selected {{ margin-top: 3px; }} QTabBar::tab:!selected:hover {{ background-color: {hover_bg}; }} QTabBar::tab:selected {{ margin-left: -2px; margin-right: -2px; margin-top: 0px; margin-bottom: -1px; background-color: {base_bg}; }}"""
-            memo_btn_stylesheet = f"""QPushButton#MemoTabGoToChapterButton, QPushButton#MemoTabSaveChapterButton, QPushButton#MemoTabSaveBookButton {{ border: 1px solid {border_color}; border-radius: 4px; background-color: {ui_bg}; color: {text_color}; padding: 2px 8px; }} QPushButton#MemoTabGoToChapterButton:hover, QPushButton#MemoTabSaveChapterButton:hover, QPushButton#MemoTabSaveBookButton:hover {{ background-color: {hover_bg}; }}"""
-            menu_stylesheet = f"""QMenu {{ background-color: {ui_bg}; border: 1px solid {border_color}; color: {text_color}; }} QMenu::item:selected {{ background-color: {hover_bg}; }} QMenu::item:disabled {{ color: #888888; }} QMenu::separator {{ height: 1px; background: {border_color}; margin-left: 5px; margin-right: 5px; }}"""
-            add_btn_stylesheet = f"""QPushButton#AddTabButton {{ border: 1px solid {border_color}; background-color: {ui_bg}; color: {text_color}; }} QPushButton#AddTabButton:hover {{ background-color: {hover_bg}; }}"""
-            in_tab_control_stylesheet = f"""
-                QPushButton {{ 
-                    border: 1px solid {border_color}; 
-                    background-color: {ui_bg}; 
-                    color: {text_color}; 
-                    border-radius: 4px; 
-                    padding: 2px 5px; 
-                }}
-                QPushButton:hover {{ 
-                    background-color: {hover_bg}; 
-                }}
-                QRadioButton {{
-                    color: {text_color};
-                    background-color: transparent;
-                    border: none;
-                }}
-                QRadioButton::indicator {{
-                    width: 14px;
-                    height: 14px;
-                    border: 1px solid {border_color};
-                    border-radius: 8px;
-                }}
-                QRadioButton::indicator:hover {{
-                    border: 1px solid {hover_bg};
-                }}
-                QRadioButton::indicator:checked {{
-                    background-color: {primary_color};
-                    border: 2px solid {border_color};
-                }}
-                QRadioButton::indicator:unchecked {{
-                    background-color: transparent;
-                }}
-            """
-
-        elif theme_name == 'Dark':
-            highlight_color = QColor("#466380")
-            highlighted_text_color = QColor("#ffffff")
-            text_color = "#eeeeee"
-            palette.setColor(QPalette.Base, QColor("#2d2d2d"))
-            bar_stylesheet = """QToolBar { background-color: #222222; border-bottom: 1px solid #444444; padding: 2px; spacing: 4px; } QToolBar QPushButton { border: 1px solid #444444; border-radius: 4px; background-color: #222222; color: #eeeeee; min-height: 24px; padding: 0 8px; } QToolBar QPushButton:hover { background-color: #3a3a3a; } QToolBar QPushButton:pressed { background-color: #222222; border: 1px solid #444444; } QToolBar QLineEdit, QToolBar QComboBox { border: 1px solid #444444; border-radius: 4px; background-color: #333333; color: #eeeeee; min-height: 24px; padding: 0 5px; } QToolBar QLabel { color: #eeeeee; }"""
-            corner_stylesheet = """QWidget#CornerWidget { background-color: transparent; } QPushButton { border: 1px solid #444444; background-color: #2d2d2d; color: #eeeeee; } QPushButton:hover { background-color: #3a3a3a; }"""
-            tab_stylesheet = """QTabWidget::pane { border-top: 1px solid #444444; background: #2d2d2d; } QTabBar { border-bottom: 1px solid #444444; } QTabBar::tab { background-color: #222222; color: #eeeeee; border: 1px solid #444444; border-bottom: none; padding: 6px 16px; border-top-left-radius: 7px; border-top-right-radius: 7px; margin-right: 2px; } QTabBar::tab:!selected { margin-top: 3px; } QTabBar::tab:!selected:hover { background-color: #3a3a3a; } QTabBar::tab:selected { margin-left: -2px; margin-right: -2px; margin-top: 0px; margin-bottom: -1px; background-color: #2d2d2d; }"""
-            memo_btn_stylesheet = """QPushButton#MemoTabGoToChapterButton, QPushButton#MemoTabSaveChapterButton, QPushButton#MemoTabSaveBookButton { border: 1px solid #444444; border-radius: 4px; background-color: #2d2d2d; color: #eeeeee; padding: 2px 8px; } QPushButton#MemoTabGoToChapterButton:hover, QPushButton#MemoTabSaveChapterButton:hover, QPushButton#MemoTabSaveBookButton:hover { background-color: #3a3a3a; }"""
-            menu_stylesheet = """QMenu { border: 1px solid #444; } QMenu::separator { height: 1px; background: #444; margin-left: 5px; margin-right: 5px; }"""
-            add_btn_stylesheet = """QPushButton#AddTabButton { border: 1px solid #444444; background-color: #2d2d2d; color: #eeeeee; } QPushButton#AddTabButton:hover { background-color: #3a3a3a; }"""
-            in_tab_control_stylesheet = """
-                QPushButton { 
-                    color: #eeeeee; 
-                    border-radius: 4px; 
-                    background-color: #222222; 
-                    padding: 2px 5px; 
-                    border: 1px solid #444444; 
-                }
-                QPushButton:hover { 
-                    background-color: #3a3a3a; 
-                }
-                QRadioButton {
-                    color: #eeeeee;
-                    background-color: transparent;
-                    border: none;
-                }
-                QRadioButton::indicator {
-                    width: 14px;
-                    height: 14px;
-                    border: 1px solid #555555;
-                    border-radius: 8px;
-                }
-                QRadioButton::indicator:hover {
-                    border: 1px solid #666666;
-                }
-                QRadioButton::indicator:checked {
-                    background-color: #5893d3;
-                    border: 2px solid #555555;
-                }
-                QRadioButton::indicator:unchecked {
-                    background-color: transparent;
-                }
-            """
-
-        else: # Light
-            highlight_color = QColor(primary_color)
-            highlighted_text_color = QColor("#ffffff")
-            text_color = "#000000"
-            palette.setColor(QPalette.Base, QColor("#ffffff"))
-            bar_stylesheet = """QToolBar { background-color: #f0f0f0; border-bottom: 1px solid #cccccc; padding: 2px; spacing: 4px; } QToolBar QPushButton { border: 1px solid #cccccc; border-radius: 4px; background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f6f6f6, stop:1 #e0e0e0); color: black; min-height: 24px; padding: 0 8px; } QToolBar QPushButton:hover { background-color: #e8e8e8; } QToolBar QPushButton:pressed { background-color: #d8d8d8; } QToolBar QLineEdit, QToolBar QComboBox { border: 1px solid #cccccc; border-radius: 4px; background-color: #ffffff; color: black; min-height: 24px; padding: 0 5px; } QToolBar QLabel { color: black; }"""
-            corner_stylesheet = """QWidget#CornerWidget { background-color: transparent; } QPushButton { border: 1px solid #cccccc; background-color: #f0f0f0; color: black; } QPushButton:hover { background-color: #e0e0e0; }"""
-            tab_stylesheet = """QTabWidget::pane { border-top: 1px solid #cccccc; background: #ffffff; } QTabBar { border-bottom: 1px solid #cccccc; } QTabBar::tab { background-color: #f0f0f0; color: black; border: 1px solid #cccccc; border-bottom: none; padding: 6px 16px; border-top-left-radius: 7px; border-top-right-radius: 7px; margin-right: 2px; } QTabBar::tab:!selected { margin-top: 3px; } QTabBar::tab:!selected:hover { background-color: #e0e0e0; } QTabBar::tab:selected { margin-left: -2px; margin-right: -2px; margin-top: 0px; margin-bottom: -1px; background-color: #ffffff; border-right: 1px solid #a2a2a2; }"""
-            memo_btn_stylesheet = """QPushButton#MemoTabGoToChapterButton, QPushButton#MemoTabSaveChapterButton, QPushButton#MemoTabSaveBookButton { border: 1px solid #cccccc; border-radius: 4px; background-color: #f0f0f0; color: black; padding: 2px 8px; } QPushButton#MemoTabGoToChapterButton:hover, QPushButton#MemoTabSaveChapterButton:hover, QPushButton#MemoTabSaveBookButton:hover { background-color: #e0e0e0; }"""
-            menu_stylesheet = """QMenu { border: 1px solid #ccc; } QMenu::item:selected { background-color: #e0e0e0; } QMenu::separator { height: 1px; background: #ccc; margin-left: 5px; margin-right: 5px; }"""
-            add_btn_stylesheet = """QPushButton#AddTabButton { border: 1px solid #cccccc; background-color: #f0f0f0; color: black; } QPushButton#AddTabButton:hover { background-color: #e0e0e0; }"""
-            in_tab_control_stylesheet = """
-                QPushButton { 
-                    color: black; 
-                    border: 1px solid #cccccc; 
-                    border-radius: 4px; 
-                    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f6f6f6, stop:1 #e0e0e0); 
-                    padding: 2px 5px; 
-                }
-                QPushButton:hover { 
-                    background-color: #e8e8e8; 
-                }
-                QRadioButton {
-                    color: black;
-                    background-color: transparent;
-                    border: none;
-                }
-                QRadioButton::indicator {
-                    width: 14px;
-                    height: 14px;
-                    border: 1px solid #bbbbbb;
-                    border-radius: 8px;
-                }
-                QRadioButton::indicator:hover {
-                    border: 1px solid #999999;
-                }
-                QRadioButton::indicator:checked {
-                    background-color: #3085d6;
-                    border: 2px solid #bbbbbb;
-                }
-                QRadioButton::indicator:unchecked {
-                    background-color: white;
-                }
-            """
-
-        palette.setColor(QPalette.ColorRole.Text, QColor(text_color))
-        palette.setColor(QPalette.ColorRole.WindowText, QColor(text_color))
-        
-        palette.setColor(QPalette.ColorRole.Highlight, highlight_color)
-        palette.setColor(QPalette.ColorRole.HighlightedText, highlighted_text_color)
-        
+        palette.setColor(QPalette.ColorRole.Base, QColor(t["surface"]))
+        palette.setColor(QPalette.ColorRole.Window, QColor(t["window"]))
+        palette.setColor(QPalette.ColorRole.Text, QColor(t["text"]))
+        palette.setColor(QPalette.ColorRole.WindowText, QColor(t["text"]))
+        palette.setColor(QPalette.ColorRole.Highlight, QColor(t["highlight"]))
+        palette.setColor(QPalette.ColorRole.HighlightedText, QColor(t["on_highlight"]))
+        palette.setColor(QPalette.ColorRole.Link, QColor(t["accent"]))
         QApplication.setPalette(palette)
-        
-        focus_stylesheet = f"QTextBrowser:focus, QTextEdit:focus, QLineEdit:focus, QListWidget:focus, QPushButton:focus, QComboBox:focus {{ border: 1px solid {focus_border_color}; }}"
-        self.setStyleSheet(focus_stylesheet)
 
-        self.current_toolbar_stylesheet = bar_stylesheet
-        self.main_toolbar.setStyleSheet(self.current_toolbar_stylesheet)
+        # 전역 QSS(office_qss)가 대부분을 담당하므로 개별 위젯의 예전 스타일시트는 비운다.
+        self.current_toolbar_stylesheet = ""
+        self.setStyleSheet("")
+        self.main_toolbar.setStyleSheet("")
         for i in range(self.tab_widget.count()):
             widget = self.tab_widget.widget(i)
-            if isinstance(widget, AdditionalReadTab):
-                if hasattr(widget, 'toolbar'):
-                    widget.toolbar.setStyleSheet(self.current_toolbar_stylesheet)
+            if isinstance(widget, AdditionalReadTab) and hasattr(widget, 'toolbar'):
+                widget.toolbar.setStyleSheet("")
 
         if corner_widget := self.tab_widget.cornerWidget():
-            corner_widget.setStyleSheet(corner_stylesheet)
-        
-        self.add_tab_btn.setStyleSheet(add_btn_stylesheet)
-        self.tab_widget.setStyleSheet(tab_stylesheet)
-        self.memo_tab.setStyleSheet(memo_btn_stylesheet)
-        
-        # [추가] 탭 내 컨트롤들에 공용 스타일 적용
-        self.search_tab.setStyleSheet(in_tab_control_stylesheet)
-        self.commentary_tab.setStyleSheet(in_tab_control_stylesheet)
-        self.crossref_tab.setStyleSheet(in_tab_control_stylesheet)
-        self.composite_tab.setStyleSheet(in_tab_control_stylesheet) # '통합' 탭에도 적용
-        self.original_language_tab.setStyleSheet(in_tab_control_stylesheet)
+            corner_widget.setStyleSheet("")
+        self.add_tab_btn.setStyleSheet("")
+        self.tab_widget.setStyleSheet("")
+        self.memo_tab.setStyleSheet("")
+        for tab in (self.search_tab, self.commentary_tab, self.crossref_tab,
+                    self.composite_tab, self.original_language_tab):
+            tab.setStyleSheet("")
+        if hasattr(self.original_language_tab, 'set_theme_mode'):
+            self.original_language_tab.set_theme_mode(mode)
 
         all_bible_views = self.read_tab.get_bible_views() + \
-                          [self.commentary_tab.bible_view, self.crossref_tab.bible_view, self.memo_tab.bible_view, self.composite_tab.bible_view]
+                          [self.commentary_tab.bible_view, self.crossref_tab.bible_view,
+                           self.memo_tab.bible_view, self.composite_tab.bible_view]
         for tab in self.additional_read_tabs:
             all_bible_views.extend(tab.get_bible_views())
-        
         for view in all_bible_views:
             if hasattr(view, 'set_menu_stylesheet'):
-                view.set_menu_stylesheet(menu_stylesheet)
-            
+                view.set_menu_stylesheet("")
+            # 본문 HTML 색상(선택 배경·절번호)을 테마에 맞춘다. 재그리기는 아래에서 일괄 처리.
+            if mode == 'dark':
+                view._selected_verse_color = "#2a4b6b"
+                view._verse_num_color = "#9aa7b4"
+            else:
+                from bible_view import SELECTED_VERSE_COLOR as _svc
+                view._selected_verse_color = _svc
+                view._verse_num_color = "#605E5C"
+
+        self._refresh_toolbar_icons()
         self.update_all_tabs_content()
 
     @Slot(int)
@@ -1763,7 +1670,7 @@ class MainWindow(QMainWindow):
         checked_style_action = self.style_action_group.checkedAction()
         verse_display_mode = checked_style_action.data() if checked_style_action else 0
         checked_theme_action = self.theme_action_group.checkedAction()
-        theme = checked_theme_action.text() if checked_theme_action else 'Dark'
+        theme = checked_theme_action.text() if checked_theme_action else 'Light'
         
         settings = {
             'book': self.current_book, 
@@ -1792,7 +1699,10 @@ class MainWindow(QMainWindow):
             'gemini_model': self._settings.get('gemini_model', DEFAULT_MODEL),
             'gemini_prompt': self._settings.get('gemini_prompt', ''),
         }
-        
+        settings.update(body_style_to_settings(
+            getattr(self, '_body_style', None) or body_style_from_settings(self._settings)
+        ))
+
         try:
             with open(self.SETTINGS_FILE, 'w', encoding='utf-8') as f: json.dump(settings, f, indent=4, ensure_ascii=False)
         except IOError as e: print(f"Error saving settings: {e}")
@@ -2035,7 +1945,7 @@ class MainWindow(QMainWindow):
 
         primary_view = bible_views[0]
         checked_theme_action = self.theme_action_group.checkedAction()
-        theme = checked_theme_action.text() if checked_theme_action else 'Dark'
+        theme = checked_theme_action.text() if checked_theme_action else 'Light'
         
         checked_style_action = self.style_action_group.checkedAction()
         verse_display_mode = checked_style_action.data() if checked_style_action else 0

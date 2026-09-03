@@ -42,6 +42,7 @@ REQUIRED_TOP_LEVEL_ITEMS = [
     ("book.ico", "file"),       # main.py: self.setWindowIcon(QIcon('book.ico'))
     ("Icon_word.svg", "file"),  # bible_view.py: QIcon("Icon_word.svg")
     ("Icon_PPT.svg", "file"),   # bible_view.py: QIcon("Icon_PPT.svg")
+    ("assets", "dir"),          # ui_theme.themed_icon(): assets/icons/*.svg (툴바 아이콘)
 ]
 # 위 목록과 별개로 "내용을 정제해서" 생성하는 항목 (아래 함수 참고)
 GENERATED_ITEMS = ["settings.json", "bible_data.db"]

@@ -5,7 +5,7 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('bible_data', 'bible_data'), ('add', 'add'), ('strongs', 'strongs'), ('settings.json', '.')],
+    datas=[('bible_data', 'bible_data'), ('add', 'add'), ('strongs', 'strongs'), ('assets', 'assets'), ('settings.json', '.')],
     hiddenimports=['qdarktheme', 'win32com.client', 'PySide6.QtNetwork'],
     hookspath=[],
     hooksconfig={},

@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt, Signal, Slot, QUrl, QPoint, QSize, QTimer
 from PySide6.QtGui import QFont, QTextOption, QPalette, QTextCursor, QKeySequence, QKeyEvent, QIcon
 
 from html_utils import apply_text_layout, get_text_alignment, get_text_direction, html_escape
+from body_style import body_style_from_settings, SERIF_STACK
 
 
 HIGHLIGHT_COLORS = {
@@ -98,7 +99,12 @@ class SharedBibleView(QWidget):
         self.font_family = initial_settings.get('font_family', 'Malgun Gothic')
         
         self.menu_stylesheet = ""
-        
+        # 테마에 따라 갱신되는 본문 색 (set_theme_mode 로 교체)
+        self._selected_verse_color = SELECTED_VERSE_COLOR
+        self._verse_num_color = "#605E5C"
+        # 본문 타이포그래피 (본문 보기 설정 창에서 조정)
+        self.body_style = body_style_from_settings(initial_settings)
+
         self.init_ui()
         self.connect_signals()
         initial_translation = initial_settings.get('translation')
@@ -112,8 +118,9 @@ class SharedBibleView(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
         control_bar = QFrame()
+        control_bar.setObjectName("viewControlBar")
         control_bar_layout = QHBoxLayout(control_bar)
-        control_bar_layout.setContentsMargins(2, 2, 2, 2)
+        control_bar_layout.setContentsMargins(6, 4, 6, 4)
         self.translation_combo = QComboBox()
         self.translation_combo.addItems(self.available_translations)
         self.translation_combo.setToolTip("번역본을 선택하세요.")
@@ -141,6 +148,7 @@ class SharedBibleView(QWidget):
         self.text_browser.setOpenExternalLinks(False)
         self.text_browser.setOpenLinks(False)
         self.text_browser.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.text_browser.document().setDocumentMargin(self.body_style.get("doc_margin", 18))
         
         palette = self.text_browser.palette()
         palette.setColor(QPalette.Base, QApplication.palette().color(QPalette.Base))
@@ -163,15 +171,22 @@ class SharedBibleView(QWidget):
         selection_layout.addStretch(1)
 
         self.selection_copy_button = QPushButton("복사")
+        self.selection_copy_button.setProperty("primary", "true")
         self.selection_compare_button = QPushButton("비교")
         self.selection_original_button = QPushButton("원어")
         self.selection_ai_button = QPushButton("설명")
         self.selection_ai_button.setToolTip("선택한 구절에 대한 AI 해설 보기 (Gemini)")
+        self.selection_word_button = QPushButton("워드")
+        self.selection_word_button.setToolTip("선택한 구절을 MS Word로 보내기")
+        self.selection_ppt_button = QPushButton("PPT")
+        self.selection_ppt_button.setToolTip("선택한 구절을 MS PowerPoint로 보내기")
         for button in [
             self.selection_copy_button,
             self.selection_compare_button,
             self.selection_original_button,
             self.selection_ai_button,
+            self.selection_word_button,
+            self.selection_ppt_button,
         ]:
             button.setFixedHeight(28)
             selection_layout.addWidget(button)
@@ -204,18 +219,36 @@ class SharedBibleView(QWidget):
         self.selection_compare_button.clicked.connect(self.open_selected_comparison)
         self.selection_original_button.clicked.connect(self.open_selected_original_language)
         self.selection_ai_button.clicked.connect(self.open_selected_ai_explanation)
+        self.selection_word_button.clicked.connect(self.send_selected_to_word)
+        self.selection_ppt_button.clicked.connect(self.send_selected_to_powerpoint)
         self.selection_clear_button.clicked.connect(lambda: self.clear_verse_selection())
         for key, button in self.highlight_color_buttons.items():
             button.clicked.connect(lambda checked=False, color_key=key: self.set_selected_highlight_color(color_key))
 
     @Slot()
     def update_action_buttons_state(self):
-        has_selection = self.text_browser.textCursor().hasSelection()
+        has_selection = (
+            self.text_browser.textCursor().hasSelection()
+            or bool(self._selected_verse_numbers())
+        )
         self.send_to_word_button.setEnabled(has_selection)
         self.send_to_ppt_button.setEnabled(has_selection)
 
     def set_menu_stylesheet(self, stylesheet):
         self.menu_stylesheet = stylesheet
+
+    def set_theme_mode(self, mode):
+        """'light' / 'dark' 에 맞춰 본문 HTML 색상을 조정하고 다시 그린다."""
+        if mode == "dark":
+            self._selected_verse_color = "#2a4b6b"
+            self._verse_num_color = "#9aa7b4"
+        else:
+            self._selected_verse_color = SELECTED_VERSE_COLOR
+            self._verse_num_color = "#605E5C"
+        try:
+            self.update_content(preserve_scroll=True, realign_verse=False)
+        except Exception:
+            pass
 
     def _selected_verse_numbers(self):
         if self.selected_verse_anchor is None or self.selected_verse_focus is None:
@@ -293,11 +326,13 @@ class SharedBibleView(QWidget):
         self.selected_verse_anchor = None
         self.selected_verse_focus = None
         self.selection_bar.hide()
+        self.update_action_buttons_state()
         if update:
             self.update_content(preserve_scroll=True, realign_verse=False)
 
     def update_selection_bar(self):
         selected = self._selected_verse_numbers()
+        self.update_action_buttons_state()
         if not selected:
             self.selection_bar.hide()
             return
@@ -371,6 +406,22 @@ class SharedBibleView(QWidget):
     def open_selected_ai_explanation(self):
         self.emit_ai_explanation_for(self._selected_verse_numbers())
 
+    @Slot()
+    def send_selected_to_word(self):
+        text, _ = self._build_selected_verse_text()
+        if not text:
+            return
+        self.request_send_to_word.emit(text)
+        self._show_selection_message("워드로 보냄")
+
+    @Slot()
+    def send_selected_to_powerpoint(self):
+        text, _ = self._build_selected_verse_text()
+        if not text:
+            return
+        self.request_send_to_powerpoint.emit(self, text)
+        self._show_selection_message("PPT로 보냄")
+
     def set_selected_highlight_color(self, color_key):
         selected = self._selected_verse_numbers()
         if not selected or not self.bible_db:
@@ -402,6 +453,18 @@ class SharedBibleView(QWidget):
         self.font_size = max(8, size)
         self.text_browser.setFont(QFont(self.font_family, self.font_size))
         self.update_content()
+
+    def apply_body_style(self, style):
+        """본문 타이포그래피(행간·절 간격·글꼴 등)를 갱신하고 다시 그린다."""
+        if not style:
+            return
+        self.body_style = dict(self.body_style)
+        self.body_style.update(style)
+        try:
+            self.text_browser.document().setDocumentMargin(self.body_style.get("doc_margin", 18))
+        except Exception:
+            pass
+        self.update_content(preserve_scroll=True, realign_verse=False)
 
     @Slot(int)
     def set_verse_display_mode(self, mode):
@@ -499,14 +562,26 @@ class SharedBibleView(QWidget):
             except Exception:
                 ai_note_ranges = {}
         selected_verses = set(self._selected_verse_numbers())
-        
+
+        # 본문 타이포그래피 설정
+        bstyle = getattr(self, "body_style", None) or {}
+        line_height = bstyle.get("line_height", 1.6)
+        verse_spacing = bstyle.get("verse_spacing", 6)
+        num_scale = bstyle.get("num_scale", 85)
+        num_muted = bstyle.get("num_muted", True)
+        subtitle_align = bstyle.get("subtitle_align", "left")
+        subtitle_accent = bstyle.get("subtitle_accent", True)
+        accent_color = QApplication.palette().color(QPalette.ColorRole.Link).name()
+        subtitle_color = accent_color if subtitle_accent else text_color_name
+        font_family_css = f"font-family: {SERIF_STACK};" if bstyle.get("font_kind") == "serif" else ""
+
         # CSS 스타일 추가: 링크와 일반 텍스트의 폰트 굵기를 일치시키기
         html_content.append(
             "<style>"
             "a { font-weight: normal !important; } "
             "td { font-weight: normal !important; } "
             "table { font-weight: normal !important; } "
-            f"body {{ direction: {direction}; }}"
+            f"body {{ direction: {direction}; {font_family_css} }}"
             "</style>"
         )
         
@@ -520,7 +595,7 @@ class SharedBibleView(QWidget):
             line = items[idx]
             subtitle_match = subtitle_re.match(line)
             if subtitle_match:
-                html_content.append(f"<p style='text-align:center; font-weight:bold; color:{text_color_name}; margin-top:15px; margin-bottom:10px;'>{html_escape(subtitle_match.group(1))}</p>")
+                html_content.append(f"<p style='text-align:{subtitle_align}; font-weight:bold; color:{subtitle_color}; margin-top:22px; margin-bottom:6px;'>{html_escape(subtitle_match.group(1))}</p>")
                 is_after_subtitle = True
                 idx += 1
                 continue
@@ -538,12 +613,14 @@ class SharedBibleView(QWidget):
             num_label = f"{start_verse}" if start_verse == end_verse else f"{start_verse}-{end_verse}"
 
             safe_book_abbr = html_escape(book_abbr)
+            num_color = getattr(self, "_verse_num_color", text_color_name) if num_muted else text_color_name
+            num_style = f"color: {num_color}; font-weight: normal; font-size: {num_scale}%;"
             if self.verse_display_mode == 0:
-                verse_prefix = f"<span style='color: {text_color_name}; font-weight: normal;'>({safe_book_abbr} {self.current_chapter}:{num_label})</span>"
+                verse_prefix = f"<span style='{num_style}'>({safe_book_abbr} {self.current_chapter}:{num_label})</span>"
             elif self.verse_display_mode == 1:
-                verse_prefix = f"<span style='color: {text_color_name}; font-weight: normal;'>{safe_book_abbr} {self.current_chapter}:{num_label}</span>"
+                verse_prefix = f"<span style='{num_style}'>{safe_book_abbr} {self.current_chapter}:{num_label}</span>"
             else:
-                verse_prefix = f"<span style='color: {text_color_name}; font-weight: normal;'>{num_label}.</span>"
+                verse_prefix = f"<span style='{num_style}'>{num_label}.</span>"
 
             # 저장된 AI 해설이 있는 구절에 작은 표시(클릭 시 그 해설을 다시 연다)
             ai_marker = ""
@@ -564,7 +641,7 @@ class SharedBibleView(QWidget):
             verse_span = range(start_verse, end_verse + 1)
             bg_color_style = ""
             if any(v in selected_verses for v in verse_span):
-                bg_color_style = f"background-color: {SELECTED_VERSE_COLOR};"
+                bg_color_style = f"background-color: {getattr(self, '_selected_verse_color', SELECTED_VERSE_COLOR)};"
             else:
                 hl = next((highlight_color_map[v] for v in verse_span if v in highlight_color_map), None)
                 if hl:
@@ -582,14 +659,14 @@ class SharedBibleView(QWidget):
             )
             align_attr = ' align="right"' if direction == "rtl" else ""
             text_cell = (
-                f'<td{align_attr} dir="{direction}" style="vertical-align: top; line-height: 1.35; font-weight: normal; {bg_color_style}">'
+                f'<td{align_attr} dir="{direction}" style="vertical-align: top; line-height: {line_height}; font-weight: normal; {bg_color_style}">'
                 f"<a href='#{start_verse}' style='text-decoration:none; color:{text_color_name}; font-weight: normal !important;'>{safe_line}</a>"
                 "</td>"
             )
             cells = f"{text_cell}{num_cell}" if direction == "rtl" else f"{num_cell}{text_cell}"
             verse_html = (
                 f'<table width="100%" border="0" cellspacing="0" cellpadding="0" '
-                f'style="border-collapse: collapse; margin-bottom: 8px; font-weight: normal; {margin_top_style}">'
+                f'style="border-collapse: collapse; margin-bottom: {verse_spacing}px; font-weight: normal; {margin_top_style}">'
                 f"<tr>{cells}</tr></table>"
             )
             html_content.append(verse_html)
@@ -915,12 +992,16 @@ class SharedBibleView(QWidget):
     @Slot()
     def trigger_send_to_word(self):
         text_to_send, _ = self._get_formatted_selection()
+        if not text_to_send:
+            text_to_send, _ = self._build_selected_verse_text()
         if text_to_send:
             self.request_send_to_word.emit(text_to_send)
 
     @Slot()
     def trigger_send_to_powerpoint(self):
         text_to_send, _ = self._get_formatted_selection()
+        if not text_to_send:
+            text_to_send, _ = self._build_selected_verse_text()
         if text_to_send:
             self.request_send_to_powerpoint.emit(self, text_to_send)
     

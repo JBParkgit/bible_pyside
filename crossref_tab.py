@@ -95,8 +95,9 @@ class CrossRefTab(QWidget):
         layout.setSpacing(2)
         
         control_bar = QFrame()
+        control_bar.setObjectName("subCommandBar")
         control_bar_layout = QHBoxLayout(control_bar)
-        control_bar_layout.setContentsMargins(2, 2, 2, 2)
+        control_bar_layout.setContentsMargins(6, 4, 6, 4)
         
         self.crossref_translation_combo = QComboBox()
         self.crossref_translation_combo.addItems(self.available_translations)

@@ -123,7 +123,7 @@ class CompositeTab(QWidget):
         
         # 접기/펼치기 버튼 추가
         self.commentary_collapse_btn = QPushButton("▼")
-        self.commentary_collapse_btn.setFixedSize(24, 24)
+        self.commentary_collapse_btn.setFixedSize(24, 24); self.commentary_collapse_btn.setProperty("compact", "true")
         self.commentary_collapse_btn.setToolTip("주석 영역 접기/펼치기")
         control_bar.addWidget(self.commentary_collapse_btn)
         control_bar.addSpacing(5)
@@ -179,12 +179,13 @@ class CompositeTab(QWidget):
         layout.setSpacing(2)
         
         control_bar = QFrame()
+        control_bar.setObjectName("subCommandBar")
         control_bar_layout = QHBoxLayout(control_bar)
-        control_bar_layout.setContentsMargins(2, 2, 2, 2)
-        
+        control_bar_layout.setContentsMargins(6, 4, 6, 4)
+
         # 접기/펼치기 버튼 추가
         self.crossref_collapse_btn = QPushButton("▼")
-        self.crossref_collapse_btn.setFixedSize(24, 24)
+        self.crossref_collapse_btn.setFixedSize(24, 24); self.crossref_collapse_btn.setProperty("compact", "true")
         self.crossref_collapse_btn.setToolTip("관주 영역 접기/펼치기")
         control_bar_layout.addWidget(self.crossref_collapse_btn)
         control_bar_layout.addSpacing(5)

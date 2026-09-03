@@ -72,6 +72,8 @@ class ComparisonDialog(QDialog):
         self.decrease_font_btn = QPushButton("-")
         self.font_size_label = QLabel(str(self.font_size))
         self.increase_font_btn = QPushButton("+")
+        for _b in (self.decrease_font_btn, self.increase_font_btn):
+            _b.setProperty("compact", "true"); _b.setFixedSize(26, 26)
 
         self.close_btn = QPushButton("닫기")
 

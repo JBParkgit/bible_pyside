@@ -25,8 +25,16 @@ class OriginalLanguageTab(QWidget):
         # 파란색 배경(하이라이트)은 특정 구절을 선택해 원어 보기를 했을 때만 표시한다.
         self.highlight_verse = False
         self.current_chapter_data = None
+        self.theme_mode = "light"
         self.init_ui()
         self.connect_signals()
+
+    def set_theme_mode(self, mode):
+        self.theme_mode = "dark" if mode == "dark" else "light"
+        try:
+            self.render_content()
+        except Exception:
+            pass
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -98,17 +106,22 @@ class OriginalLanguageTab(QWidget):
             return
 
         mode = self.mode_combo.currentData()
+        dark = getattr(self, "theme_mode", "light") == "dark"
+        c_border = "#3d3d3d" if dark else "#d0d7de"
+        c_current = "#2a4b6b" if dark else "#dbeafe"
+        c_link = "#5CB2FF" if dark else "#0969da"
+        c_muted = "#9aa7b4" if dark else "#57606a"
         html = [
             "<html><head><style>",
             "body { font-family: 'Malgun Gothic', Arial, sans-serif; font-size: 15px; line-height: 1.6; }",
-            ".verse { border-bottom: 1px solid #d0d7de; padding: 12px 4px; }",
-            ".verse.current { background-color: #dbeafe; }",
-            ".verse-number { font-weight: 700; color: #0969da; text-decoration: none; margin-right: 6px; }",
+            f".verse {{ border-bottom: 1px solid {c_border}; padding: 12px 4px; }}",
+            f".verse.current {{ background-color: {c_current}; }}",
+            f".verse-number {{ font-weight: 700; color: {c_link}; text-decoration: none; margin-right: 6px; }}",
             ".source-text { font-size: 16px; margin: 4px 0 10px 0; }",
             ".tokens { margin-top: 6px; line-height: 2.0; }",
             ".token-word { font-size: 18px; }",
-            ".token-code { font-size: 12px; text-decoration: none; color: #0969da; }",
-            ".token-gloss { font-size: 12px; color: #57606a; }",
+            f".token-code {{ font-size: 12px; text-decoration: none; color: {c_link}; }}",
+            f".token-gloss {{ font-size: 12px; color: {c_muted}; }}",
             "</style></head><body>",
         ]
 
@@ -205,14 +218,18 @@ class OriginalLanguageTab(QWidget):
         original_dir = "rtl" if entry.get("language") == "Hebrew" else "ltr"
         usage_items = usage["items"][:200]
 
+        dark = getattr(self, "theme_mode", "light") == "dark"
+        c_border = "#3d3d3d" if dark else "#d0d7de"
+        c_link = "#5CB2FF" if dark else "#0969da"
+        c_muted = "#9aa7b4" if dark else "#57606a"
         html = [
             "<html><head><style>",
             "body { font-family: 'Malgun Gothic', Arial, sans-serif; line-height: 1.55; }",
             "h2 { margin: 0 0 8px 0; }",
-            ".code { color: #0969da; font-weight: 700; }",
+            f".code {{ color: {c_link}; font-weight: 700; }}",
             ".original { font-size: 28px; margin: 8px 0; }",
-            ".label { color: #57606a; font-size: 12px; margin-top: 12px; }",
-            ".usage { margin: 8px 0; padding-bottom: 8px; border-bottom: 1px solid #d0d7de; }",
+            f".label {{ color: {c_muted}; font-size: 12px; margin-top: 12px; }}",
+            f".usage {{ margin: 8px 0; padding-bottom: 8px; border-bottom: 1px solid {c_border}; }}",
             "</style></head><body>",
             f"<h2><span class='code'>{html_escape(code)}</span></h2>",
             f"<div class='original' dir='{original_dir}'>{html_escape(original)}</div>",

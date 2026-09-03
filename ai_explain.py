@@ -415,7 +415,9 @@ class AiExplanationDialog(QDialog):
         self.question_edit = QLineEdit()
         self.question_edit.setPlaceholderText("이 본문에 대해 물어보기…  (비워두면 기본 설명)")
         self.ask_button = QPushButton("질문")
+        self.ask_button.setProperty("primary", "true")
         self.explain_button = QPushButton("기본 설명")
+        self.explain_button.setProperty("primary", "true")
         question_row.addWidget(self.question_edit, 1)
         question_row.addWidget(self.ask_button)
         question_row.addWidget(self.explain_button)
@@ -423,7 +425,7 @@ class AiExplanationDialog(QDialog):
 
         button_row = QHBoxLayout()
         self.status_label = QLabel()
-        self.status_label.setStyleSheet("color: #57606a;")
+        self.status_label.setStyleSheet("color: palette(mid);")
         button_row.addWidget(self.status_label)
         button_row.addStretch(1)
         self.log_button = QPushButton("로그")

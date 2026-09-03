@@ -103,6 +103,8 @@ class AdditionalReadTab(QWidget):
         # 폰트 크기 컨트롤
         self.font_minus_button = QPushButton("-"); self.font_size_label = QLabel(str(self.font_size))
         self.font_plus_button = QPushButton("+")
+        for _b in (self.font_minus_button, self.font_plus_button):
+            _b.setProperty("compact", "true"); _b.setFixedSize(26, 26)
         toolbar.addWidget(self.font_minus_button); toolbar.addWidget(self.font_size_label)
         toolbar.addWidget(self.font_plus_button)
         

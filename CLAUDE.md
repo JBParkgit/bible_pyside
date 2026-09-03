@@ -64,6 +64,19 @@ User preferences stored in `settings.json`:
 - Verse display mode (0: "(창1:1)", 1: "창1:1", 2: "1.") — chosen via the toolbar `verse_style_combo`
 - `gemini_api_key` / `gemini_model` / `gemini_prompt` — for the AI verse-explanation feature (`gemini_prompt` empty ⇒ use `DEFAULT_PROMPT_TEMPLATE`)
 
+### Theming (`ui_theme.py`)
+
+Modern MS Office / Fluent look. Only **Light** and **Dark** exist (the old Sepia / Gray themes were retired; any stored `Sepia`/`Gray` value migrates via `resolve_mode()` — Gray→Dark, Sepia→Light). `ui_theme.py` holds:
+- `TOKENS["light"|"dark"]` — design tokens (accent, surfaces, borders, text, fills, radii).
+- `office_qss(mode)` — one comprehensive app-wide QSS string, layered on top of `qdarktheme.setup_theme(theme, corner_shape="rounded", custom_colors=..., additional_qss=office_qss(mode))`.
+- `themed_icon(name, color)` — renders `assets/icons/<name>.svg` (the `COLOR` placeholder is swapped for `color`) into a multi-size `QIcon`.
+
+`MainWindow.apply_theme()` is now token-driven: it sets the palette, clears the old per-widget stylesheets (global QSS covers toolbar/tabs/menus/scrollbars/dialogs), calls `_refresh_toolbar_icons()`, and pushes the mode to HTML-rendering views (`SharedBibleView._selected_verse_color`/`_verse_num_color`, `OriginalLanguageTab.set_theme_mode`). Objects the QSS targets by name: `QToolBar#mainToolBar`, `QFrame#viewControlBar` / `#subCommandBar`, `QFrame#selectionBar`, `QFrame#mainFrame`, `QPushButton#AddTabButton`, `QFrame#vsep`. Button roles via dynamic properties: `primary="true"` (accent fill), `subtle="true"`, `compact="true"` (tiny +/- buttons — kills padding), `iconButton="true"` (toolbar icon squares).
+
+### Body-text typography (`body_style.py`, `body_style_dialog.py`)
+
+**설정 및 추출 → 본문 보기 설정...** opens `BodyStyleDialog` — a live preview (3–5 verses of the current passage) plus knobs: 본문 글꼴 (sans / serif `SERIF_STACK`), 행간, 절 간격, 절 번호 크기·색, 소제목 정렬·강조색, 본문 여백. `저장` emits `applied(dict)` → `MainWindow._apply_body_style` pushes to every `SharedBibleView.apply_body_style()` and persists as flat `body_*` keys in `settings.json` (defaults in `DEFAULT_BODY_STYLE`). `SharedBibleView.update_content()` reads `self.body_style` for line-height / verse spacing / verse-number size / subtitle style, and `document().setDocumentMargin()` for the page margin.
+
 ### AI verse explanation (`ai_explain.py`)
 
 The selection action bar's **설명** button (and the text context menu's "이 절 AI 해설" / "선택 범위 AI 해설") opens a reusable non-modal `AiExplanationDialog` for the selected verse range. It does **not** answer immediately — the user chooses **기본 설명** (editable default prompt) or types their own question. The user supplies a free API key (https://aistudio.google.com/apikey) via **설정 및 추출 → AI 설명 설정 (Gemini)** (also model + prompt template editing). Calls are async via `QNetworkAccessManager` (`GeminiClient`) with auto-retry on transient (429/503) errors; no extra dependency (QtNetwork ships with PySide6).

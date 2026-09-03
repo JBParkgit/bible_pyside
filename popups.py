@@ -16,7 +16,8 @@ class BookChapterPopup(QWidget):
         super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
         self.data_loader = data_loader
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground); self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        self.main_frame = QFrame(self); self.main_frame.setObjectName("mainFrame"); self.main_frame.setStyleSheet("#mainFrame { border: 1px solid palette(highlight); border-radius: 5px; background-color: palette(window); }")
+        self.main_frame = QFrame(self); self.main_frame.setObjectName("mainFrame")
+        self.main_frame.setStyleSheet("#mainFrame { border: 1px solid palette(mid); border-radius: 8px; background-color: palette(base); }")
 
         outer = QVBoxLayout(self.main_frame); outer.setContentsMargins(5, 5, 5, 5); outer.setSpacing(4)
 

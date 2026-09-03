@@ -80,6 +80,8 @@ class ReadModeViewer(QDialog):
         self.font_minus_btn = QPushButton("-")
         self.font_size_label = QLabel(str(self.font_size))
         self.font_plus_btn = QPushButton("+")
+        for _b in (self.font_minus_btn, self.font_plus_btn):
+            _b.setProperty("compact", "true"); _b.setFixedSize(26, 26)
         menu_toolbar.addWidget(self.font_minus_btn)
         menu_toolbar.addWidget(self.font_size_label)
         menu_toolbar.addWidget(self.font_plus_btn)
