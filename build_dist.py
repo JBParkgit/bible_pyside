@@ -38,6 +38,7 @@ FINAL_ZIP = os.path.join(ROOT, "dist", "waterdbible")  # shutil이 .zip을 붙�
 REQUIRED_TOP_LEVEL_ITEMS = [
     ("bible_data", "dir"),      # data_loaders.BibleDataLoader(base_data_path="bible_data")
     ("add", "dir"),             # CommentaryDataLoader/CrossrefDataLoader 기본 경로
+    ("strongs", "dir"),         # original_language_data.OriginalLanguageDataLoader(base_path="strongs")
     ("book.ico", "file"),       # main.py: self.setWindowIcon(QIcon('book.ico'))
     ("Icon_word.svg", "file"),  # bible_view.py: QIcon("Icon_word.svg")
     ("Icon_PPT.svg", "file"),   # bible_view.py: QIcon("Icon_PPT.svg")
@@ -91,7 +92,10 @@ def write_clean_settings():
     # 배포판 최초 실행 시 낯선 개인 데이터(절대경로 등)가 섞이지 않도록 정제
     settings["book"] = "창세기"
     settings["chapter"] = 1
-    settings["verse_collection_file"] = "my_verse_collection.txt"
+    settings.pop("verse_collection_file", None)
+    settings.pop("verse_collection_font_size", None)
+    # 개인 API 키는 절대 배포하지 않는다
+    settings.pop("gemini_api_key", None)
 
     dst_path = os.path.join(DIST_APP_DIR, "settings.json")
     with open(dst_path, "w", encoding="utf-8") as f:

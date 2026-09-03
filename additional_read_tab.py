@@ -15,7 +15,6 @@ class AdditionalReadTab(QWidget):
     """
     # MainWindow와 통신하기 위한 시그널
     request_search = Signal(str, str)
-    request_add_to_collection = Signal(object, str, str)
     request_send_to_word = Signal(str)
     request_send_to_powerpoint = Signal(object, str)
     request_commentary = Signal(str, int, int)
@@ -194,7 +193,7 @@ class AdditionalReadTab(QWidget):
         if self.splitter.count() >= 4: return
         view_settings = {'translation': self.available_translations[0], 'bible_font_size': self.font_size, 'font_family': self.font_family, 'verse_display_mode': 0}
         new_view = SharedBibleView(self.data_loader, self.available_translations, initial_settings=view_settings, context='read', bible_db=self.bible_db)
-        new_view.request_search.connect(self.request_search); new_view.request_add_to_collection.connect(self.request_add_to_collection)
+        new_view.request_search.connect(self.request_search)
         new_view.request_send_to_word.connect(self.request_send_to_word); new_view.request_send_to_powerpoint.connect(self.request_send_to_powerpoint)
         new_view.request_commentary.connect(self.request_commentary); new_view.request_cross_ref.connect(self.request_cross_ref)
         new_view.scroll_changed.connect(self.sync_scroll)
@@ -265,9 +264,6 @@ class AdditionalReadTab(QWidget):
         self.status_label_left.setText(message)
         self.status_timer.start(5000)
 
-    def handle_add_to_collection_shortcut(self):
-        for view in self.get_bible_views():
-            if view.text_browser.hasFocus(): view.trigger_add_to_collection(); break
     def handle_send_to_word_shortcut(self):
         for view in self.get_bible_views():
             if view.text_browser.hasFocus(): view.trigger_send_to_word(); break

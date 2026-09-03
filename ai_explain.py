@@ -10,13 +10,18 @@
 - AiSettingsDialog    : API 키 / 모델 입력 대화상자
 """
 import json
+import os
+import re
+import time
+from datetime import datetime
 
 from PySide6.QtCore import QObject, Signal, QUrl, QTimer, Qt
 from PySide6.QtGui import QFont, QDesktopServices
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkReply
+
 from PySide6.QtWidgets import (
-    QApplication, QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QLabel,
-    QLineEdit, QPlainTextEdit, QPushButton, QTextBrowser, QVBoxLayout,
+    QApplication, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout,
+    QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton, QTextBrowser, QVBoxLayout,
 )
 
 
@@ -69,6 +74,19 @@ def build_prompt(reference, passage, translation="", template=None):
     ))
 
 
+def build_question_prompt(reference, passage, translation, question):
+    """선택 구절에 대한 사용자의 자유 질문용 프롬프트."""
+    version = f" · {translation}" if translation else ""
+    return (
+        "당신은 성경을 알기 쉽게 설명하는 개신교 성경 교사입니다. "
+        "아래 성경 본문에 관한 질문에 한국어로 답해 주세요. 본문과 성경 전체의 "
+        "문맥에 근거해 설명하고, 본문에 없는 사실이나 존재하지 않는 성경 구절을 "
+        "지어내지 마세요. 불확실하면 그렇다고 쓰세요.\n\n"
+        f"[{reference}{version}]\n{passage}\n\n"
+        f"질문: {question}"
+    )
+
+
 class GeminiClient(QObject):
     """generativelanguage.googleapis.com 에 비동기로 요청하고 결과를 시그널로 알린다.
 
@@ -78,6 +96,10 @@ class GeminiClient(QObject):
     finished = Signal(str)        # 설명 텍스트(markdown)
     failed = Signal(str)          # 오류 메시지
     retrying = Signal(int, int)   # (재시도 회차, 총 시도 횟수)
+    log_line = Signal(str)        # API 통신 로그 한 줄
+
+    LOG_FILE = "gemini_api.log"
+    MAX_LOG_ENTRIES = 400
 
     MAX_ATTEMPTS = 3
     RETRY_DELAYS_MS = [5000, 12000]  # 2번째, 3번째 시도 전 대기
@@ -88,21 +110,63 @@ class GeminiClient(QObject):
         "deadline", "timeout",
     )
 
+    REQUEST_TIMEOUT_MS = 90000     # 서버 전송 타임아웃
+    WATCHDOG_MS = 120000           # 그래도 안 끝나면 강제 중단
+
+    HEARTBEAT_MS = 3000           # 대기 중 살아있음을 로그로 알리는 간격
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._nam = QNetworkAccessManager(self)
         self._reply = None
         self._request = None      # (api_key, model, prompt)
         self._attempt = 0
+        self._req_started = 0.0
+        self._uploaded = False
+        self._first_byte = False
+        self.log_entries = []     # 최근 통신 로그 (뷰어가 나중에 열려도 보이도록 보관)
         self._retry_timer = QTimer(self)
         self._retry_timer.setSingleShot(True)
         self._retry_timer.timeout.connect(self._send)
+        self._watchdog = QTimer(self)
+        self._watchdog.setSingleShot(True)
+        self._watchdog.timeout.connect(self._on_watchdog)
+        self._heartbeat = QTimer(self)
+        self._heartbeat.timeout.connect(self._on_heartbeat)
+
+    def _on_heartbeat(self):
+        if self._reply is None:
+            self._heartbeat.stop()
+            return
+        elapsed = time.monotonic() - self._req_started
+        self._log(f"   … 응답 대기 중 ({elapsed:.0f}초 경과)")
+
+    def _log(self, text):
+        line = f"[{datetime.now().strftime('%H:%M:%S')}] {text}"
+        self.log_entries.append(line)
+        if len(self.log_entries) > self.MAX_LOG_ENTRIES:
+            del self.log_entries[:len(self.log_entries) - self.MAX_LOG_ENTRIES]
+        self.log_line.emit(line)
+        try:
+            with open(self.LOG_FILE, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        except OSError:
+            pass
+
+    def clear_log(self):
+        self.log_entries.clear()
+        try:
+            open(self.LOG_FILE, "w", encoding="utf-8").close()
+        except OSError:
+            pass
 
     def is_busy(self):
         return self._reply is not None or self._retry_timer.isActive()
 
     def cancel(self):
         self._retry_timer.stop()
+        self._watchdog.stop()
+        self._heartbeat.stop()
         self._request = None
         if self._reply is not None:
             reply, self._reply = self._reply, None
@@ -113,13 +177,35 @@ class GeminiClient(QObject):
             reply.abort()
             reply.deleteLater()
 
+    def _on_watchdog(self):
+        """타임아웃/멈춤 방지: 응답이 안 오면 재시도 없이 즉시 중단·실패 처리."""
+        self._log(f"⏱ 워치독: {self.WATCHDOG_MS // 1000}초간 응답 없음 — 중단")
+        self._retry_timer.stop()
+        self._heartbeat.stop()
+        self._request = None
+        if self._reply is not None:
+            reply, self._reply = self._reply, None
+            try:
+                reply.finished.disconnect(self._on_finished)
+            except (RuntimeError, TypeError):
+                pass
+            reply.abort()
+            reply.deleteLater()
+        self.failed.emit(
+            "응답이 오지 않습니다. 네트워크(방화벽/프록시) 또는 서버 상태를 확인한 뒤 다시 시도하세요."
+        )
+
     def explain(self, api_key, model, prompt):
         if not api_key:
+            self._log("요청 취소: API 키 없음")
             self.failed.emit("API 키가 설정되지 않았습니다.")
             return
         self.cancel()
         self._request = (api_key, model or DEFAULT_MODEL, prompt)
         self._attempt = 0
+        snippet = " ".join(prompt.split())[:200]
+        self._log(f"── 새 요청 (모델 {self._request[1]}, 프롬프트 {len(prompt)}자)")
+        self._log(f"   프롬프트: {snippet}{'…' if len(prompt) > 200 else ''}")
         self._send()
 
     def _send(self):
@@ -127,18 +213,43 @@ class GeminiClient(QObject):
             return
         api_key, model, prompt = self._request
         self._attempt += 1
+        self._req_started = time.monotonic()
         url = QUrl(
             f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
         )
+        self._log(f"→ POST {model}:generateContent  (시도 {self._attempt}/{self.MAX_ATTEMPTS})")
         request = QNetworkRequest(url)
         request.setHeader(QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json")
         request.setRawHeader(b"x-goog-api-key", api_key.encode("utf-8"))
+        try:
+            request.setTransferTimeout(self.REQUEST_TIMEOUT_MS)
+        except (AttributeError, TypeError):
+            pass
         body = json.dumps({
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"temperature": 0.4, "maxOutputTokens": 8192},
         }).encode("utf-8")
+        self._uploaded = False
+        self._first_byte = False
         self._reply = self._nam.post(request, body)
         self._reply.finished.connect(self._on_finished)
+        self._reply.uploadProgress.connect(self._on_upload_progress)
+        self._reply.downloadProgress.connect(self._on_download_progress)
+        self._watchdog.start(self.WATCHDOG_MS)
+        self._heartbeat.start(self.HEARTBEAT_MS)
+
+    def _on_upload_progress(self, sent, total):
+        if not self._uploaded and total > 0 and sent >= total:
+            self._uploaded = True
+            elapsed = time.monotonic() - self._req_started
+            self._log(f"   ↑ 요청 전송 완료 ({sent}바이트, {elapsed * 1000:.0f}ms) — 서버 응답 기다리는 중")
+
+    def _on_download_progress(self, received, total):
+        if not self._first_byte and received > 0:
+            self._first_byte = True
+            self._heartbeat.stop()
+            elapsed = time.monotonic() - self._req_started
+            self._log(f"   ↓ 응답 수신 시작 ({elapsed:.1f}초) — 정상 통신 중")
 
     def _is_transient(self, http_status, message):
         if http_status in self._TRANSIENT_HTTP:
@@ -149,13 +260,17 @@ class GeminiClient(QObject):
     def _retry_or_fail(self, message):
         if self._request and self._attempt < self.MAX_ATTEMPTS:
             delay = self.RETRY_DELAYS_MS[min(self._attempt - 1, len(self.RETRY_DELAYS_MS) - 1)]
+            self._log(f"⟳ {delay // 1000}초 후 재시도 ({self._attempt + 1}/{self.MAX_ATTEMPTS}) — {message}")
             self.retrying.emit(self._attempt + 1, self.MAX_ATTEMPTS)
             self._retry_timer.start(delay)
             return
         self._request = None
+        self._log(f"✗ 실패: {message}")
         self.failed.emit(message)
 
     def _on_finished(self):
+        self._watchdog.stop()
+        self._heartbeat.stop()
         reply = self._reply
         self._reply = None
         if reply is None:
@@ -164,36 +279,51 @@ class GeminiClient(QObject):
         raw = bytes(reply.readAll().data())
         net_error = reply.error()
         http_status = reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        elapsed = (time.monotonic() - self._req_started) * 1000 if self._req_started else 0
+        self._log(f"← HTTP {http_status}  {elapsed:.0f}ms  ({len(raw)}바이트)")
         try:
             data = json.loads(raw.decode("utf-8")) if raw else {}
         except (ValueError, UnicodeDecodeError):
             data = {}
+            if raw:
+                self._log(f"   (JSON 파싱 실패) {raw[:300].decode('utf-8', 'replace')}")
 
         if isinstance(data, dict) and data.get("error"):
             message = data["error"].get("message", "알 수 없는 오류")
+            self._log(f"   API 오류: {message}")
             if self._is_transient(http_status, message):
                 self._retry_or_fail(f"Gemini 오류: {message}")
                 return
             if "no longer available" in message or "not found" in message.lower():
                 message += "\n\n'설정 및 추출 → AI 설명 설정'에서 모델 이름을 바꿔 보세요."
             self._request = None
+            self._log(f"✗ 실패: {message}")
             self.failed.emit(f"Gemini 오류: {message}")
             return
 
         if net_error != QNetworkReply.NetworkError.NoError:
+            self._log(f"   네트워크 오류: {reply.errorString()}")
             if self._is_transient(http_status, reply.errorString()):
                 self._retry_or_fail(f"네트워크 오류: {reply.errorString()}")
                 return
             self._request = None
+            self._log(f"✗ 실패: {reply.errorString()}")
             self.failed.emit(f"네트워크 오류: {reply.errorString()}")
             return
 
         text = self._extract_text(data)
         if not text:
             self._request = None
+            finish_reason = ""
+            try:
+                finish_reason = data["candidates"][0].get("finishReason", "")
+            except (KeyError, IndexError, TypeError):
+                pass
+            self._log(f"✗ 빈 응답 (finishReason={finish_reason or '없음'})")
             self.failed.emit("응답이 비어 있습니다. (안전 필터에 걸렸거나 토큰 한도를 초과했을 수 있습니다.)")
             return
         self._request = None
+        self._log(f"✓ 완료 — 응답 {len(text)}자")
         self.finished.emit(text)
 
     @staticmethod
@@ -205,15 +335,66 @@ class GeminiClient(QObject):
         return "".join(part.get("text", "") for part in parts).strip()
 
 
+class AiLogDialog(QDialog):
+    """Gemini API 통신 로그 뷰어 (비모달)."""
+
+    clear_requested = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("AI 통신 로그")
+        self.resize(680, 460)
+        self.setModal(False)
+        layout = QVBoxLayout(self)
+
+        self.view = QPlainTextEdit()
+        self.view.setReadOnly(True)
+        self.view.setFont(QFont("Consolas", 10))
+        self.view.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        layout.addWidget(self.view, 1)
+
+        row = QHBoxLayout()
+        row.addStretch(1)
+        self.clear_button = QPushButton("지우기")
+        self.copy_button = QPushButton("전체 복사")
+        self.close_button = QPushButton("닫기")
+        for b in (self.clear_button, self.copy_button, self.close_button):
+            row.addWidget(b)
+        layout.addLayout(row)
+
+        self.clear_button.clicked.connect(self._clear)
+        self.copy_button.clicked.connect(
+            lambda: QApplication.clipboard().setText(self.view.toPlainText())
+        )
+        self.close_button.clicked.connect(self.close)
+
+    def set_entries(self, entries):
+        self.view.setPlainText("\n".join(entries))
+        self.view.moveCursor(self.view.textCursor().MoveOperation.End)
+
+    def append(self, line):
+        self.view.appendPlainText(line)
+        self.view.moveCursor(self.view.textCursor().MoveOperation.End)
+
+    def _clear(self):
+        self.view.clear()
+        self.clear_requested.emit()
+
+
 class AiExplanationDialog(QDialog):
     """AI 설명 결과를 보여주는 비모달 창. 같은 창을 재사용한다."""
 
-    regenerate_requested = Signal()
+    regenerate_requested = Signal()   # 마지막 요청(기본 설명 또는 질문) 다시 실행
+    default_requested = Signal()       # 기본 설명 프롬프트로 실행
+    question_submitted = Signal(str)   # 선택 구절에 대한 사용자의 자유 질문
+    save_requested = Signal()          # 현재 해설을 해당 구절에 저장(DB)
+    delete_requested = Signal()        # 이 구절에 저장된 해설 삭제
+    log_requested = Signal()           # 통신 로그 창 열기
 
     def __init__(self, parent=None, font_family="Malgun Gothic", font_size=13):
         super().__init__(parent)
         self.setWindowTitle("AI 구절 설명")
-        self.resize(560, 640)
+        self.resize(560, 660)
         self.setModal(False)
         self._raw_text = ""
 
@@ -229,28 +410,107 @@ class AiExplanationDialog(QDialog):
         self.browser.setFont(QFont(font_family, font_size))
         layout.addWidget(self.browser, 1)
 
+        # 이 본문에 대해 직접 질문하기
+        question_row = QHBoxLayout()
+        self.question_edit = QLineEdit()
+        self.question_edit.setPlaceholderText("이 본문에 대해 물어보기…  (비워두면 기본 설명)")
+        self.ask_button = QPushButton("질문")
+        self.explain_button = QPushButton("기본 설명")
+        question_row.addWidget(self.question_edit, 1)
+        question_row.addWidget(self.ask_button)
+        question_row.addWidget(self.explain_button)
+        layout.addLayout(question_row)
+
         button_row = QHBoxLayout()
         self.status_label = QLabel()
         self.status_label.setStyleSheet("color: #57606a;")
         button_row.addWidget(self.status_label)
         button_row.addStretch(1)
+        self.log_button = QPushButton("로그")
+        self.log_button.setToolTip("Gemini API 통신 로그 보기")
         self.regenerate_button = QPushButton("다시 생성")
         self.copy_button = QPushButton("복사")
+        self.save_button = QPushButton("구절에 저장")
+        self.save_button.setToolTip("이 해설을 해당 구절에 연동해 저장합니다. 다음에 그 구절의 AI 해설을 열면 바로 표시됩니다.")
+        self.delete_button = QPushButton("저장 삭제")
+        self.delete_button.setToolTip("이 구절에 저장된 AI 해설을 삭제합니다.")
+        self.delete_button.setVisible(False)
+        self.export_button = QPushButton("파일로…")
         self.close_button = QPushButton("닫기")
-        for button in (self.regenerate_button, self.copy_button, self.close_button):
+        for button in (self.log_button, self.regenerate_button, self.copy_button,
+                       self.save_button, self.delete_button, self.export_button, self.close_button):
             button_row.addWidget(button)
         layout.addLayout(button_row)
 
+        self.log_button.clicked.connect(self.log_requested.emit)
         self.regenerate_button.clicked.connect(self.regenerate_requested.emit)
+        self.explain_button.clicked.connect(self.default_requested.emit)
         self.copy_button.clicked.connect(self._copy_text)
+        self.save_button.clicked.connect(self.save_requested.emit)
+        self.delete_button.clicked.connect(self.delete_requested.emit)
+        self.export_button.clicked.connect(self._save_text)
         self.close_button.clicked.connect(self.close)
+        self.ask_button.clicked.connect(self._submit_question)
+        self.question_edit.returnPressed.connect(self._submit_question)
+
+    def _submit_question(self):
+        text = self.question_edit.text().strip()
+        if text:
+            self.question_submitted.emit(text)
+
+    def _set_busy(self, busy):
+        for widget in (self.regenerate_button, self.explain_button, self.ask_button,
+                       self.question_edit, self.copy_button, self.save_button,
+                       self.delete_button, self.export_button):
+            widget.setEnabled(not busy)
+
+    def _set_has_result(self, has_result):
+        for widget in (self.regenerate_button, self.copy_button, self.save_button, self.export_button):
+            widget.setEnabled(has_result)
+
+    def prepare(self, reference, passage, saved_note=None):
+        """답변 없이 대기 상태로 연다. 사용자가 '기본 설명' 또는 직접 질문을 선택한다.
+        saved_note 가 있으면 그 해설을 바로 보여준다."""
+        self.reference_label.setText(reference)
+        self.status_label.setText("")
+        self.question_edit.clear()
+        self._set_busy(False)
+        self.delete_button.setVisible(bool(saved_note))
+        self.delete_button.setEnabled(bool(saved_note))
+        if saved_note:
+            self._raw_text = saved_note
+            try:
+                self.browser.setMarkdown(saved_note)
+            except Exception:
+                self.browser.setPlainText(saved_note)
+            self.status_label.setText("저장된 해설")
+            self._set_has_result(True)
+        else:
+            self._raw_text = ""
+            body = (passage.strip() + "\n\n---\n\n") if passage and passage.strip() else ""
+            self.browser.setMarkdown(
+                body + "**[기본 설명]** 버튼을 누르거나, 아래 칸에 이 본문에 대한 질문을 입력하세요."
+            )
+            self._set_has_result(False)
+        self.show()
+        self.raise_()
+        self.activateWindow()
+        self.question_edit.setFocus()
+
+    def mark_saved(self):
+        self.status_label.setText("구절에 저장됨")
+        self.delete_button.setVisible(True)
+        self.delete_button.setEnabled(True)
+
+    def mark_deleted(self):
+        self.status_label.setText("저장된 해설을 삭제했습니다")
+        self.delete_button.setVisible(False)
 
     def start(self, reference):
         self.reference_label.setText(reference)
-        self.status_label.setText("생성 중…")
-        self.browser.setPlainText("잠시만 기다려 주세요. Gemini가 본문을 설명하고 있습니다…")
-        self.regenerate_button.setEnabled(False)
-        self.copy_button.setEnabled(False)
+        self.status_label.setText("생성 중…  (응답이 없으면 최대 2분 후 자동 중단)")
+        self.browser.setPlainText("잠시만 기다려 주세요. Gemini가 답변을 준비하고 있습니다…")
+        self._set_busy(True)
         self.show()
         self.raise_()
         self.activateWindow()
@@ -265,21 +525,52 @@ class AiExplanationDialog(QDialog):
             self.browser.setMarkdown(text)
         except Exception:
             self.browser.setPlainText(text)
-        self.regenerate_button.setEnabled(True)
-        self.copy_button.setEnabled(True)
+        self._set_busy(False)
+        self._set_has_result(True)
+        self.question_edit.clear()
 
     def show_error(self, message):
         self.status_label.setText("오류")
         self.browser.setPlainText(message)
-        self.regenerate_button.setEnabled(True)
-        self.copy_button.setEnabled(False)
+        self._set_busy(False)
+        self._set_has_result(False)
 
     def _copy_text(self):
         QApplication.clipboard().setText(self._raw_text or self.browser.toPlainText())
 
+    def _save_text(self):
+        content = self._raw_text or self.browser.toPlainText()
+        if not content.strip():
+            return
+        reference = self.reference_label.text().strip() or "AI 설명"
+        safe = re.sub(r'[\\/:*?"<>|]+', "_", reference)[:80].strip() or "AI 설명"
+        base_dir = os.path.join(os.path.expanduser("~"), "Documents")
+        if not os.path.isdir(base_dir):
+            base_dir = os.path.expanduser("~")
+        default_path = os.path.join(base_dir, f"{safe}.md")
+        path, selected = QFileDialog.getSaveFileName(
+            self, "AI 설명 저장", default_path,
+            "마크다운 (*.md);;텍스트 (*.txt);;모든 파일 (*)",
+        )
+        if not path:
+            return
+        if selected.startswith("텍스트") and not os.path.splitext(path)[1]:
+            path += ".txt"
+        elif not os.path.splitext(path)[1]:
+            path += ".md"
+        try:
+            with open(path, "w", encoding="utf-8") as file:
+                file.write(f"# {reference}\n\n{content}\n")
+        except OSError as error:
+            QMessageBox.warning(self, "저장 실패", f"파일을 저장하지 못했습니다:\n{error}")
+            return
+        self.status_label.setText(f"저장됨: {os.path.basename(path)}")
+
 
 class AiSettingsDialog(QDialog):
     """Gemini API 키 / 모델 / 프롬프트 편집."""
+
+    log_requested = Signal()
 
     def __init__(self, api_key="", model=DEFAULT_MODEL, prompt="", parent=None):
         super().__init__(parent)
@@ -312,8 +603,12 @@ class AiSettingsDialog(QDialog):
 
         open_button = QPushButton("발급 페이지 열기")
         open_button.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(API_KEY_URL)))
+        log_button = QPushButton("통신 로그 보기")
+        log_button.setToolTip("Gemini API 와 실시간으로 어떻게 통신하는지 로그로 확인합니다.")
+        log_button.clicked.connect(self.log_requested.emit)
         open_row = QHBoxLayout()
         open_row.addWidget(open_button)
+        open_row.addWidget(log_button)
         open_row.addStretch(1)
         layout.addLayout(open_row)
 

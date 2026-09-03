@@ -56,6 +56,27 @@ class BibleDatabase:
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
+
+        # AI 해설 저장 테이블 (구절 범위 단위)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS ai_notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                book TEXT NOT NULL,
+                chapter INTEGER NOT NULL,
+                start_verse INTEGER NOT NULL,
+                end_verse INTEGER NOT NULL,
+                reference TEXT,
+                question TEXT DEFAULT '',
+                content TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(book, chapter, start_verse, end_verse)
+            )
+        ''')
+        cursor.execute('''
+            CREATE INDEX IF NOT EXISTS idx_ai_notes_book_chapter
+            ON ai_notes(book, chapter)
+        ''')
         
         # 인덱스 생성
         cursor.execute('''
@@ -494,6 +515,73 @@ class BibleDatabase:
         except Exception as e:
             print(f"가져오기 오류: {e}")
             conn.rollback()
+            return False
+        finally:
+            conn.close()
+
+    # ========== AI 해설 관련 메서드 ==========
+
+    def save_ai_note(self, book: str, chapter: int, start_verse: int, end_verse: int,
+                     content: str, reference: str = '', question: str = '') -> bool:
+        """구절 범위에 대한 AI 해설을 저장(있으면 갱신)한다."""
+        conn = self.get_connection()
+        try:
+            conn.execute('''
+                INSERT INTO ai_notes (book, chapter, start_verse, end_verse, reference, question, content)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(book, chapter, start_verse, end_verse) DO UPDATE SET
+                    reference=excluded.reference,
+                    question=excluded.question,
+                    content=excluded.content,
+                    updated_at=CURRENT_TIMESTAMP
+            ''', (book, chapter, start_verse, end_verse, reference, question, content))
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"AI 해설 저장 오류: {e}")
+            return False
+        finally:
+            conn.close()
+
+    def get_ai_note(self, book: str, chapter: int, start_verse: int, end_verse: int) -> Optional[Dict]:
+        """정확히 일치하는 구절 범위의 AI 해설을 반환한다."""
+        conn = self.get_connection()
+        try:
+            row = conn.execute('''
+                SELECT * FROM ai_notes
+                WHERE book=? AND chapter=? AND start_verse=? AND end_verse=?
+            ''', (book, chapter, start_verse, end_verse)).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def get_ai_notes(self, book: str, chapter: int) -> List[Dict]:
+        """한 장에 저장된 모든 AI 해설을 반환한다."""
+        conn = self.get_connection()
+        try:
+            rows = conn.execute('''
+                SELECT * FROM ai_notes WHERE book=? AND chapter=?
+                ORDER BY start_verse, end_verse
+            ''', (book, chapter)).fetchall()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    def get_ai_note_verses(self, book: str, chapter: int) -> set:
+        """AI 해설이 저장된 시작 구절 번호 집합 (읽기 화면 표시용)."""
+        return {n['start_verse'] for n in self.get_ai_notes(book, chapter)}
+
+    def delete_ai_note(self, book: str, chapter: int, start_verse: int, end_verse: int) -> bool:
+        conn = self.get_connection()
+        try:
+            conn.execute('''
+                DELETE FROM ai_notes
+                WHERE book=? AND chapter=? AND start_verse=? AND end_verse=?
+            ''', (book, chapter, start_verse, end_verse))
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"AI 해설 삭제 오류: {e}")
             return False
         finally:
             conn.close()

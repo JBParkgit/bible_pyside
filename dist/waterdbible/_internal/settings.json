@@ -1,13 +1,13 @@
 {
     "book": "신명기",
-    "chapter": 7,
+    "chapter": 8,
     "font_family": "맑은 고딕",
     "bible_font_size": 13,
     "verse_display_mode": 1,
     "num_views": 2,
     "view_translations": [
         "개역개정",
-        "개역개정"
+        "中文和合本"
     ],
     "commentary_font_size": 13,
     "crossref_display_font_size": 13,
@@ -17,10 +17,11 @@
     "composite_crossref_font_size": 13,
     "composite_crossref_translation": "개역개정",
     "composite_crossref_style_mode": 1,
-    "verse_collection_file": "C:/web/bible_viewer_pyside/my_verse_collection.txt",
-    "verse_collection_font_size": 14,
     "search_font_size": 14,
     "theme": "Light",
     "comparison_font_size": 13,
-    "default_start_tab": 1
+    "default_start_tab": 1,
+    "gemini_api_key": "",
+    "gemini_model": "gemini-3.6-flash",
+    "gemini_prompt": ""
 }

@@ -14,7 +14,6 @@ class CompositeTab(QWidget):
     # 모든 자식 위젯의 시그널을 중계합니다.
     settings_changed = Signal()
     request_search = Signal(str, str)
-    request_add_to_collection = Signal(object, str, str)
     request_send_to_word = Signal(str)
     request_send_to_powerpoint = Signal(object, str)
     request_navigation = Signal(str, int, int)
@@ -250,7 +249,6 @@ class CompositeTab(QWidget):
         self.bible_view.request_commentary.connect(self.request_commentary)
         self.bible_view.request_cross_ref.connect(self.request_cross_ref)
         self.bible_view.request_search.connect(self.request_search)
-        self.bible_view.request_add_to_collection.connect(self.request_add_to_collection)
         self.bible_view.request_send_to_word.connect(self.request_send_to_word)
         self.bible_view.request_send_to_powerpoint.connect(self.request_send_to_powerpoint)
         
@@ -364,19 +362,16 @@ class CompositeTab(QWidget):
         menu.addSeparator()
 
         search_action = menu.addAction("검색")
-        collection_action = menu.addAction("편집으로 보내기 (Ctrl+L)")
         word_action = menu.addAction("MS Word로 보내기 (Ctrl+W)")
         ppt_action = menu.addAction("MS PowerPoint로 보내기 (Ctrl+P)")
         search_action.setEnabled(has_selection)
-        collection_action.setEnabled(has_selection)
         word_action.setEnabled(has_selection)
         ppt_action.setEnabled(has_selection)
-        
+
         if has_selection:
             selected_text = text_cursor.selection().toPlainText().strip()
             search_translation = self.bible_view.translation_combo.currentText()
             search_action.triggered.connect(lambda: self.request_search.emit(selected_text, search_translation))
-            collection_action.triggered.connect(lambda: self.request_add_to_collection.emit(self, selected_text, "주석 내용"))
             word_action.triggered.connect(lambda: self.request_send_to_word.emit(selected_text))
             ppt_action.triggered.connect(lambda: self.request_send_to_powerpoint.emit(self, selected_text))
         menu.exec(self.commentary_text_browser.mapToGlobal(pos))
@@ -501,19 +496,16 @@ class CompositeTab(QWidget):
         menu.addSeparator()
 
         search_action = menu.addAction("검색")
-        collection_action = menu.addAction("편집으로 보내기 (Ctrl+L)")
         word_action = menu.addAction("MS Word로 보내기 (Ctrl+W)")
         ppt_action = menu.addAction("MS PowerPoint로 보내기 (Ctrl+P)")
         search_action.setEnabled(has_selection)
-        collection_action.setEnabled(has_selection)
         word_action.setEnabled(has_selection)
         ppt_action.setEnabled(has_selection)
-        
+
         if has_selection:
             selected_text = text_cursor.selection().toPlainText().strip()
             search_translation = self.crossref_translation_combo.currentText()
             search_action.triggered.connect(lambda: self.request_search.emit(selected_text, search_translation))
-            collection_action.triggered.connect(lambda: self.request_add_to_collection.emit(self, selected_text, "관주 내용"))
             word_action.triggered.connect(lambda: self.request_send_to_word.emit(selected_text))
             ppt_action.triggered.connect(lambda: self.request_send_to_powerpoint.emit(self, selected_text))
         menu.exec(self.crossref_text_browser.mapToGlobal(pos))
@@ -538,18 +530,6 @@ class CompositeTab(QWidget):
         self.status_timer.stop()
         self.status_label_left.setText(message)
         self.status_timer.start(5000)
-
-    def handle_add_to_collection_shortcut(self):
-        if self.bible_view.text_browser.hasFocus():
-            self.bible_view.trigger_add_to_collection()
-        elif self.commentary_text_browser.hasFocus():
-            cursor = self.commentary_text_browser.textCursor()
-            if cursor.hasSelection():
-                self.request_add_to_collection.emit(self, cursor.selection().toPlainText().strip(), "주석 내용")
-        elif self.crossref_text_browser.hasFocus():
-            cursor = self.crossref_text_browser.textCursor()
-            if cursor.hasSelection():
-                self.request_add_to_collection.emit(self, cursor.selection().toPlainText().strip(), "관주 내용")
 
     def handle_send_to_word_shortcut(self):
         if self.bible_view.text_browser.hasFocus():

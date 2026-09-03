@@ -21,3 +21,6 @@ build/**/*.zip
 Thumbs.db
 .idea/
 .vscode/
+
+# AI API 통신 로그
+gemini_api.log

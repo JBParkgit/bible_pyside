@@ -29,7 +29,6 @@ from bible_view import SharedBibleView
 from commentary_tab import CommentaryTab
 from crossref_tab import CrossRefTab
 from search_tab import SearchTab
-from verse_collection_tab import VerseCollectionTab
 from read_mode_viewer import ReadModeViewer
 from memo_tab import MemoTab
 from popups import BookChapterPopup
@@ -39,8 +38,8 @@ from bible_database import BibleDatabase
 from original_language_data import OriginalLanguageDataLoader
 from original_language_tab import OriginalLanguageTab
 from ai_explain import (
-    GeminiClient, AiExplanationDialog, AiSettingsDialog, build_prompt,
-    DEFAULT_MODEL, LEGACY_DEFAULT_MODELS,
+    GeminiClient, AiExplanationDialog, AiSettingsDialog, AiLogDialog,
+    build_prompt, build_question_prompt, DEFAULT_MODEL, LEGACY_DEFAULT_MODELS,
 )
 
 
@@ -543,12 +542,6 @@ class ReadTab(QWidget):
         self.status_label_left.setText(message)
         self.status_timer.start(5000)
 
-    def handle_add_to_collection_shortcut(self):
-        for view in self.get_bible_views():
-            if view.text_browser.hasFocus():
-                view.trigger_add_to_collection()
-                break
-
     def handle_send_to_word_shortcut(self):
         for view in self.get_bible_views():
             if view.text_browser.hasFocus():
@@ -620,7 +613,9 @@ class MainWindow(QMainWindow):
         self.gemini_client.finished.connect(self._on_ai_explanation_ready)
         self.gemini_client.failed.connect(self._on_ai_explanation_failed)
         self.gemini_client.retrying.connect(self._on_ai_explanation_retrying)
+        self.gemini_client.log_line.connect(self._append_ai_log)
         self.ai_dialog = None
+        self.ai_log_dialog = None
         self._last_ai_request = None
 
         self.init_ui()
@@ -664,7 +659,6 @@ class MainWindow(QMainWindow):
         self.search_tab = SearchTab(self.data_loader, initial_settings=self._settings)
         self.commentary_tab = CommentaryTab(self.data_loader, self.commentary_data_loader, initial_settings=self._settings, bible_db=self.bible_db)
         self.crossref_tab = CrossRefTab(self.data_loader, self.crossref_data_loader, initial_settings=self._settings, bible_db=self.bible_db)
-        self.verse_collection_tab = VerseCollectionTab(file_path=self._settings.get('verse_collection_file', 'my_verse_collection.txt'), initial_settings=self._settings)
         self.memo_tab = MemoTab(self.data_loader, initial_settings=self._settings, bible_db=self.bible_db)
         self.original_language_tab = OriginalLanguageTab(self.original_language_data_loader)
         
@@ -676,7 +670,6 @@ class MainWindow(QMainWindow):
         self.tab_widget.addTab(self.search_tab, "검색")
         self.tab_widget.addTab(self.commentary_tab, "주석")
         self.tab_widget.addTab(self.crossref_tab, "관주")
-        self.tab_widget.addTab(self.verse_collection_tab, "편집")
         self.tab_widget.addTab(self.memo_tab, "메모")
         self.tab_widget.addTab(self.original_language_tab, "원어")
         # --- 수정 끝
@@ -687,7 +680,6 @@ class MainWindow(QMainWindow):
         self.tab_widget.setTabToolTip(self.tab_widget.indexOf(self.search_tab), "검색 탭으로 이동 (F3)")
         self.tab_widget.setTabToolTip(self.tab_widget.indexOf(self.commentary_tab), "주석 탭으로 이동 (F4)")
         self.tab_widget.setTabToolTip(self.tab_widget.indexOf(self.crossref_tab), "관주 탭으로 이동 (F5)")
-        self.tab_widget.setTabToolTip(self.tab_widget.indexOf(self.verse_collection_tab), "편집 탭으로 이동 (F6)")
         self.tab_widget.setTabToolTip(self.tab_widget.indexOf(self.memo_tab), "메모 탭으로 이동 (F7)")
         self.tab_widget.setTabToolTip(self.tab_widget.indexOf(self.original_language_tab), "원어 탭으로 이동 (F11)")
         # --- 수정 끝
@@ -934,27 +926,21 @@ class MainWindow(QMainWindow):
         self.search_tab.request_navigation.connect(self.go_to_verse_in_read_tab)
         self.search_tab.request_new_read_tab.connect(self.go_to_verse_in_new_read_tab)
         self.search_tab.request_search.connect(self.perform_search_with_selection)
-        self.search_tab.request_add_to_collection.connect(self.send_selected_text_to_verse_collection)
         self.search_tab.request_send_to_word.connect(self.on_request_send_to_word)
         self.search_tab.request_send_to_powerpoint.connect(self.on_request_send_to_powerpoint)
 
         self.commentary_tab.request_search.connect(self.perform_search_with_selection)
-        self.commentary_tab.request_add_to_collection.connect(self.send_selected_text_to_verse_collection)
         self.commentary_tab.request_send_to_word.connect(self.on_request_send_to_word)
         self.commentary_tab.request_send_to_powerpoint.connect(self.on_request_send_to_powerpoint)
 
         self.crossref_tab.request_navigation.connect(self.go_to_verse_in_read_tab)
         self.crossref_tab.request_new_read_tab.connect(self.go_to_verse_in_new_read_tab)
         self.crossref_tab.request_search.connect(self.perform_search_with_selection)
-        self.crossref_tab.request_add_to_collection.connect(self.send_selected_text_to_verse_collection)
         self.crossref_tab.request_send_to_word.connect(self.on_request_send_to_word)
         self.crossref_tab.request_send_to_powerpoint.connect(self.on_request_send_to_powerpoint)
         self.original_language_tab.request_navigation.connect(self.go_to_verse_in_read_tab)
 
-        self.verse_collection_tab.request_send_to_word.connect(self.on_request_send_to_word)
-        self.verse_collection_tab.request_send_to_powerpoint.connect(self.on_request_send_to_powerpoint)
-
-        for tab in [self.commentary_tab, self.crossref_tab, self.verse_collection_tab, self.search_tab, self.memo_tab]: 
+        for tab in [self.commentary_tab, self.crossref_tab, self.search_tab, self.memo_tab]:
             if hasattr(tab, 'settings_changed'):
                 tab.settings_changed.connect(self.save_settings)
 
@@ -965,7 +951,6 @@ class MainWindow(QMainWindow):
         self.composite_tab.request_navigation.connect(self.go_to_verse_in_read_tab)
         self.composite_tab.request_new_read_tab.connect(self.go_to_verse_in_new_read_tab)
         self.composite_tab.request_search.connect(self.perform_search_with_selection)
-        self.composite_tab.request_add_to_collection.connect(self.send_selected_text_to_verse_collection)
         self.composite_tab.request_send_to_word.connect(self.on_request_send_to_word)
         self.composite_tab.request_send_to_powerpoint.connect(self.on_request_send_to_powerpoint)
         # --- (4) 수정 끝 ---
@@ -975,7 +960,6 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("F3"), self, lambda: self.tab_widget.setCurrentWidget(self.search_tab))
         QShortcut(QKeySequence("F4"), self, lambda: self.tab_widget.setCurrentWidget(self.commentary_tab))
         QShortcut(QKeySequence("F5"), self, lambda: self.tab_widget.setCurrentWidget(self.crossref_tab))
-        QShortcut(QKeySequence("F6"), self, lambda: self.tab_widget.setCurrentWidget(self.verse_collection_tab))
         QShortcut(QKeySequence("F7"), self, lambda: self.tab_widget.setCurrentWidget(self.memo_tab))
 
         QShortcut(QKeySequence("F10"), self, lambda: self.tab_widget.setCurrentWidget(self.composite_tab)) # <<< (5) 수정됨
@@ -984,17 +968,10 @@ class MainWindow(QMainWindow):
         QShortcut(QKeySequence("Ctrl+D"), self, lambda: self.nav_input.setFocus())
         QShortcut(QKeySequence("Ctrl+F"), self, lambda: self.search_input.setFocus())
 
-        QShortcut(QKeySequence("Ctrl+L"), self, self.on_add_to_collection_shortcut)
         QShortcut(QKeySequence("Ctrl+W"), self, self.on_send_to_word_shortcut)
         QShortcut(QKeySequence("Ctrl+P"), self, self.on_send_to_powerpoint_shortcut)
         QShortcut(QKeySequence("Ctrl+H"), self, self.on_highlight_shortcut)
         QShortcut(QKeySequence("Ctrl+H"), self, self.on_highlight_shortcut)
-
-    @Slot()
-    def on_add_to_collection_shortcut(self):
-        current_tab = self.tab_widget.currentWidget()
-        if hasattr(current_tab, 'handle_add_to_collection_shortcut'):
-            current_tab.handle_add_to_collection_shortcut()
 
     @Slot()
     def on_send_to_word_shortcut(self):
@@ -1059,7 +1036,6 @@ class MainWindow(QMainWindow):
         new_view.request_commentary.connect(self.go_to_commentary_for_verse)
         new_view.request_cross_ref.connect(self.go_to_crossref_for_verse)
         new_view.request_search.connect(self.perform_search_with_selection)
-        new_view.request_add_to_collection.connect(self.send_selected_text_to_verse_collection)
         new_view.request_send_to_word.connect(self.on_request_send_to_word)
         new_view.request_send_to_powerpoint.connect(self.on_request_send_to_powerpoint)
         new_view.request_original_language.connect(self.go_to_original_language_for_range)
@@ -1071,14 +1047,7 @@ class MainWindow(QMainWindow):
         """하이라이트 변경 시 현재 보이는 성경 뷰만 스크롤 위치를 유지한 채 갱신한다.
         update_all_tabs_content() 는 update_all_views()/구절 재정렬을 거쳐 스크롤이
         튀므로 하이라이트 토글에는 쓰지 않는다."""
-        views = list(self.read_tab.get_bible_views())
-        for tab in getattr(self, 'additional_read_tabs', []):
-            views.extend(tab.get_bible_views())
-        for aux in (self.commentary_tab, self.crossref_tab, self.memo_tab, self.composite_tab):
-            bible_view = getattr(aux, 'bible_view', None)
-            if bible_view is not None:
-                views.append(bible_view)
-        for view in views:
+        for view in self._all_bible_views():
             view.update_content(preserve_scroll=True, realign_verse=False)
 
     def sync_aux_tabs_with_main_view(self):
@@ -1153,6 +1122,7 @@ class MainWindow(QMainWindow):
             self._settings.get('gemini_prompt', ''),
             self,
         )
+        dialog.log_requested.connect(self._show_ai_log)
         if dialog.exec():
             key, model, prompt = dialog.values()
             self._settings['gemini_api_key'] = key
@@ -1160,8 +1130,9 @@ class MainWindow(QMainWindow):
             self._settings['gemini_prompt'] = prompt
             self.save_settings()
 
-    @Slot(str, str, str)
-    def request_ai_explanation_for_selection(self, reference, passage, translation):
+    @Slot(str, str, str, str, int, int, int)
+    def request_ai_explanation_for_selection(self, reference, passage, translation,
+                                             book, chapter, start_verse, end_verse):
         api_key = self._settings.get('gemini_api_key', '')
         if not api_key:
             answer = QMessageBox.question(
@@ -1173,35 +1144,124 @@ class MainWindow(QMainWindow):
                 self.open_ai_settings_dialog()
             return
 
-        self._last_ai_request = (reference, passage, translation)
+        self._last_ai_request = {
+            'reference': reference, 'passage': passage, 'translation': translation,
+            'question': None, 'book': book, 'chapter': chapter,
+            'start': start_verse, 'end': end_verse,
+        }
         if self.ai_dialog is None:
             self.ai_dialog = AiExplanationDialog(
                 self, self.font_family, self._settings.get('bible_font_size', 13)
             )
             self.ai_dialog.regenerate_requested.connect(self._regenerate_ai_explanation)
-        self.ai_dialog.start(reference)
-        self.gemini_client.explain(
-            api_key,
-            self._settings.get('gemini_model', DEFAULT_MODEL),
-            build_prompt(reference, passage, translation,
-                         self._settings.get('gemini_prompt', '')),
-        )
+            self.ai_dialog.default_requested.connect(self._run_default_ai_explanation)
+            self.ai_dialog.question_submitted.connect(self._ask_ai_question)
+            self.ai_dialog.save_requested.connect(self._save_ai_note)
+            self.ai_dialog.delete_requested.connect(self._delete_ai_note)
+            self.ai_dialog.log_requested.connect(self._show_ai_log)
+            # 창을 닫으면 진행 중인 요청도 취소한다
+            self.ai_dialog.close_button.clicked.connect(self.gemini_client.cancel)
+
+        # 저장된 해설이 있으면 바로 보여주고, 없으면 '기본 설명/질문' 선택 화면을 연다.
+        saved = None
+        if self.bible_db is not None:
+            note = self.bible_db.get_ai_note(book, chapter, start_verse, end_verse)
+            saved = note['content'] if note else None
+        self.ai_dialog.prepare(reference, passage, saved)
+
+    def _send_ai_request(self):
+        """_last_ai_request 상태(기본 설명 또는 질문)에 맞춰 Gemini 호출."""
+        req = self._last_ai_request
+        if not req:
+            return
+        api_key = self._settings.get('gemini_api_key', '')
+        model = self._settings.get('gemini_model', DEFAULT_MODEL)
+        if req['question']:
+            prompt = build_question_prompt(req['reference'], req['passage'],
+                                           req['translation'], req['question'])
+        else:
+            prompt = build_prompt(req['reference'], req['passage'], req['translation'],
+                                  self._settings.get('gemini_prompt', ''))
+        self.gemini_client.explain(api_key, model, prompt)
 
     @Slot()
     def _regenerate_ai_explanation(self):
-        if not self._last_ai_request:
+        """'다시 생성' — 마지막 요청(기본 설명 또는 질문)을 그대로 재실행."""
+        req = self._last_ai_request
+        if not req or self.ai_dialog is None:
             return
-        reference, passage, translation = self._last_ai_request
-        api_key = self._settings.get('gemini_api_key', '')
-        if not api_key or self.ai_dialog is None:
+        header = f"{req['reference']} — {req['question']}" if req['question'] else req['reference']
+        self.ai_dialog.start(header)
+        self._send_ai_request()
+
+    @Slot()
+    def _run_default_ai_explanation(self):
+        """'기본 설명' — 질문 상태를 지우고 기본 프롬프트로 실행."""
+        req = self._last_ai_request
+        if not req or self.ai_dialog is None:
             return
-        self.ai_dialog.start(reference)
-        self.gemini_client.explain(
-            api_key,
-            self._settings.get('gemini_model', DEFAULT_MODEL),
-            build_prompt(reference, passage, translation,
-                         self._settings.get('gemini_prompt', '')),
+        req['question'] = None
+        self.ai_dialog.start(req['reference'])
+        self._send_ai_request()
+
+    @Slot(str)
+    def _ask_ai_question(self, question):
+        """사용자가 입력한 자유 질문을 선택 구절과 함께 전송."""
+        req = self._last_ai_request
+        if not req or self.ai_dialog is None:
+            return
+        req['question'] = question
+        self.ai_dialog.start(f"{req['reference']} — {question}")
+        self._send_ai_request()
+
+    @Slot()
+    def _save_ai_note(self):
+        """현재 표시된 해설을 해당 구절 범위에 연동해 저장한다."""
+        req = self._last_ai_request
+        if not req or self.ai_dialog is None or self.bible_db is None:
+            return
+        content = self.ai_dialog._raw_text
+        if not content or not content.strip():
+            return
+        ok = self.bible_db.save_ai_note(
+            req['book'], req['chapter'], req['start'], req['end'],
+            content, req['reference'], req['question'] or '',
         )
+        if ok:
+            self.ai_dialog.mark_saved()
+            # 읽기 화면의 AI 해설 표시 갱신
+            self._refresh_ai_note_markers()
+
+    @Slot()
+    def _delete_ai_note(self):
+        """이 구절에 저장된 AI 해설을 삭제한다."""
+        req = self._last_ai_request
+        if not req or self.ai_dialog is None or self.bible_db is None:
+            return
+        answer = QMessageBox.question(
+            self.ai_dialog, "AI 해설 삭제",
+            f"'{req['reference']}' 에 저장된 AI 해설을 삭제할까요?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        if self.bible_db.delete_ai_note(req['book'], req['chapter'], req['start'], req['end']):
+            self.ai_dialog.mark_deleted()
+            self._refresh_ai_note_markers()
+
+    def _refresh_ai_note_markers(self):
+        for view in self._all_bible_views():
+            view.update_content(preserve_scroll=True, realign_verse=False)
+
+    def _all_bible_views(self):
+        views = list(self.read_tab.get_bible_views())
+        for tab in getattr(self, 'additional_read_tabs', []):
+            views.extend(tab.get_bible_views())
+        for aux in (self.commentary_tab, self.crossref_tab, self.memo_tab, self.composite_tab):
+            bible_view = getattr(aux, 'bible_view', None)
+            if bible_view is not None:
+                views.append(bible_view)
+        return views
 
     @Slot(str)
     def _on_ai_explanation_ready(self, text):
@@ -1217,6 +1277,21 @@ class MainWindow(QMainWindow):
     def _on_ai_explanation_retrying(self, attempt, total):
         if self.ai_dialog is not None:
             self.ai_dialog.note_retry(attempt, total)
+
+    @Slot(str)
+    def _append_ai_log(self, line):
+        if self.ai_log_dialog is not None:
+            self.ai_log_dialog.append(line)
+
+    @Slot()
+    def _show_ai_log(self):
+        if self.ai_log_dialog is None:
+            self.ai_log_dialog = AiLogDialog(self)
+            self.ai_log_dialog.clear_requested.connect(self.gemini_client.clear_log)
+        self.ai_log_dialog.set_entries(self.gemini_client.log_entries)
+        self.ai_log_dialog.show()
+        self.ai_log_dialog.raise_()
+        self.ai_log_dialog.activateWindow()
 
     def apply_global_font(self):
         for i in range(self.tab_widget.count()):
@@ -1259,7 +1334,6 @@ class MainWindow(QMainWindow):
         bar_stylesheet = ""
         corner_stylesheet = ""
         tab_stylesheet = ""
-        vct_stylesheet = ""
         memo_btn_stylesheet = ""
         text_color = ""
         menu_stylesheet = ""
@@ -1276,7 +1350,6 @@ class MainWindow(QMainWindow):
             bar_stylesheet = f"""QToolBar {{ background-color: {ui_bg}; border-bottom: 1px solid {border_color}; padding: 2px; spacing: 4px; }} QToolBar QPushButton {{ border: 1px solid {border_color}; border-radius: 4px; background-color: {ui_bg}; color: {text_color}; min-height: 24px; padding: 0 8px; }} QToolBar QPushButton:hover {{ background-color: {hover_bg}; }} QToolBar QPushButton:pressed {{ background-color: {ui_bg}; }} QToolBar QLineEdit, QToolBar QComboBox {{ border: 1px solid {border_color}; border-radius: 4px; background-color: #ffffff; color: {text_color}; min-height: 24px; padding: 0 5px; }} QToolBar QLabel {{ color: {text_color}; }}"""
             corner_stylesheet = f"""QWidget#CornerWidget {{ background-color: transparent; }} QPushButton {{ border: 1px solid {border_color}; background-color: {ui_bg}; color: {text_color}; }} QPushButton:hover {{ background-color: {hover_bg}; }}"""
             tab_stylesheet = f"""QTabWidget::pane {{ border-top: 1px solid {border_color}; background: {base_bg}; }} QTabBar {{ border-bottom: 1px solid {border_color}; }} QTabBar::tab {{ background-color: {ui_bg}; color: {text_color}; border: 1px solid {border_color}; border-bottom: none; padding: 6px 16px; border-top-left-radius: 7px; border-top-right-radius: 7px; margin-right: 2px; }} QTabBar::tab:!selected {{ margin-top: 3px; }} QTabBar::tab:!selected:hover {{ background-color: {hover_bg}; }} QTabBar::tab:selected {{ margin-left: -2px; margin-right: -2px; margin-top: 0px; margin-bottom: -1px; background-color: {base_bg}; }}"""
-            vct_stylesheet = f"""QFrame#VerseCollectionControlBar {{ background-color: {ui_bg}; border-top: 1px solid {border_color}; }} QFrame#VerseCollectionControlBar QPushButton {{ border: 1px solid {border_color}; border-radius: 4px; background-color: {ui_bg}; color: {text_color}; min-height: 24px; padding: 0 8px; }} QFrame#VerseCollectionControlBar QPushButton:hover {{ background-color: {hover_bg}; }} QFrame#VerseCollectionControlBar QLabel {{ border: none; color: {text_color}; }}"""
             memo_btn_stylesheet = f"""QPushButton#MemoTabGoToChapterButton, QPushButton#MemoTabSaveChapterButton, QPushButton#MemoTabSaveBookButton {{ border: 1px solid {border_color}; border-radius: 4px; background-color: {ui_bg}; color: {text_color}; padding: 2px 8px; }} QPushButton#MemoTabGoToChapterButton:hover, QPushButton#MemoTabSaveChapterButton:hover, QPushButton#MemoTabSaveBookButton:hover {{ background-color: {hover_bg}; }}"""
             menu_stylesheet = f"""QMenu {{ background-color: {ui_bg}; border: 1px solid {border_color}; color: {text_color}; }} QMenu::item:selected {{ background-color: {hover_bg}; }} QMenu::item:disabled {{ color: #a08f82; }} QMenu::separator {{ height: 1px; background: {border_color}; margin-left: 5px; margin-right: 5px; }}"""
             add_btn_stylesheet = f"""QPushButton#AddTabButton {{ border: 1px solid {border_color}; background-color: {ui_bg}; color: {text_color}; }} QPushButton#AddTabButton:hover {{ background-color: {hover_bg}; }}"""
@@ -1322,7 +1395,6 @@ class MainWindow(QMainWindow):
             bar_stylesheet = f"""QToolBar {{ background-color: {ui_bg}; border-bottom: 1px solid {border_color}; padding: 2px; spacing: 4px; }} QToolBar QPushButton {{ border: 1px solid {border_color}; border-radius: 4px; background-color: {ui_bg}; color: {text_color}; min-height: 24px; padding: 0 8px; }} QToolBar QPushButton:hover {{ background-color: {hover_bg}; }} QToolBar QPushButton:pressed {{ background-color: {ui_bg}; }} QToolBar QLineEdit, QToolBar QComboBox {{ border: 1px solid {border_color}; border-radius: 4px; background-color: #6a6a6a; color: {text_color}; min-height: 24px; padding: 0 5px; }} QToolBar QLabel {{ color: {text_color}; }}"""
             corner_stylesheet = f"""QWidget#CornerWidget {{ background-color: transparent; }} QPushButton {{ border: 1px solid {border_color}; background-color: {ui_bg}; color: {text_color}; }} QPushButton:hover {{ background-color: {hover_bg}; }}"""
             tab_stylesheet = f"""QTabWidget::pane {{ border-top: 1px solid {border_color}; background: {base_bg}; }} QTabBar {{ border-bottom: 1px solid {border_color}; }} QTabBar::tab {{ background-color: {ui_bg}; color: {text_color}; border: 1px solid {border_color}; border-bottom: none; padding: 6px 16px; border-top-left-radius: 7px; border-top-right-radius: 7px; margin-right: 2px; }} QTabBar::tab:!selected {{ margin-top: 3px; }} QTabBar::tab:!selected:hover {{ background-color: {hover_bg}; }} QTabBar::tab:selected {{ margin-left: -2px; margin-right: -2px; margin-top: 0px; margin-bottom: -1px; background-color: {base_bg}; }}"""
-            vct_stylesheet = f"""QFrame#VerseCollectionControlBar {{ background-color: {ui_bg}; border-top: 1px solid {border_color}; }} QFrame#VerseCollectionControlBar QPushButton {{ border: 1px solid {border_color}; border-radius: 4px; background-color: {ui_bg}; color: {text_color}; min-height: 24px; padding: 0 8px; }} QFrame#VerseCollectionControlBar QPushButton:hover {{ background-color: {hover_bg}; }} QFrame#VerseCollectionControlBar QLabel {{ border: none; color: {text_color}; }}"""
             memo_btn_stylesheet = f"""QPushButton#MemoTabGoToChapterButton, QPushButton#MemoTabSaveChapterButton, QPushButton#MemoTabSaveBookButton {{ border: 1px solid {border_color}; border-radius: 4px; background-color: {ui_bg}; color: {text_color}; padding: 2px 8px; }} QPushButton#MemoTabGoToChapterButton:hover, QPushButton#MemoTabSaveChapterButton:hover, QPushButton#MemoTabSaveBookButton:hover {{ background-color: {hover_bg}; }}"""
             menu_stylesheet = f"""QMenu {{ background-color: {ui_bg}; border: 1px solid {border_color}; color: {text_color}; }} QMenu::item:selected {{ background-color: {hover_bg}; }} QMenu::item:disabled {{ color: #888888; }} QMenu::separator {{ height: 1px; background: {border_color}; margin-left: 5px; margin-right: 5px; }}"""
             add_btn_stylesheet = f"""QPushButton#AddTabButton {{ border: 1px solid {border_color}; background-color: {ui_bg}; color: {text_color}; }} QPushButton#AddTabButton:hover {{ background-color: {hover_bg}; }}"""
@@ -1368,7 +1440,6 @@ class MainWindow(QMainWindow):
             bar_stylesheet = """QToolBar { background-color: #222222; border-bottom: 1px solid #444444; padding: 2px; spacing: 4px; } QToolBar QPushButton { border: 1px solid #444444; border-radius: 4px; background-color: #222222; color: #eeeeee; min-height: 24px; padding: 0 8px; } QToolBar QPushButton:hover { background-color: #3a3a3a; } QToolBar QPushButton:pressed { background-color: #222222; border: 1px solid #444444; } QToolBar QLineEdit, QToolBar QComboBox { border: 1px solid #444444; border-radius: 4px; background-color: #333333; color: #eeeeee; min-height: 24px; padding: 0 5px; } QToolBar QLabel { color: #eeeeee; }"""
             corner_stylesheet = """QWidget#CornerWidget { background-color: transparent; } QPushButton { border: 1px solid #444444; background-color: #2d2d2d; color: #eeeeee; } QPushButton:hover { background-color: #3a3a3a; }"""
             tab_stylesheet = """QTabWidget::pane { border-top: 1px solid #444444; background: #2d2d2d; } QTabBar { border-bottom: 1px solid #444444; } QTabBar::tab { background-color: #222222; color: #eeeeee; border: 1px solid #444444; border-bottom: none; padding: 6px 16px; border-top-left-radius: 7px; border-top-right-radius: 7px; margin-right: 2px; } QTabBar::tab:!selected { margin-top: 3px; } QTabBar::tab:!selected:hover { background-color: #3a3a3a; } QTabBar::tab:selected { margin-left: -2px; margin-right: -2px; margin-top: 0px; margin-bottom: -1px; background-color: #2d2d2d; }"""
-            vct_stylesheet = """QFrame#VerseCollectionControlBar { background-color: #2d2d2d; border-top: 1px solid #444444; } QFrame#VerseCollectionControlBar QPushButton { color: #eeeeee; border-radius: 4px; background-color: #222222; min-height: 24px; padding: 0 8px; } QFrame#VerseCollectionControlBar QPushButton:hover { background-color: #3a3a3a; } QFrame#VerseCollectionControlBar QLabel { border: none; }"""
             memo_btn_stylesheet = """QPushButton#MemoTabGoToChapterButton, QPushButton#MemoTabSaveChapterButton, QPushButton#MemoTabSaveBookButton { border: 1px solid #444444; border-radius: 4px; background-color: #2d2d2d; color: #eeeeee; padding: 2px 8px; } QPushButton#MemoTabGoToChapterButton:hover, QPushButton#MemoTabSaveChapterButton:hover, QPushButton#MemoTabSaveBookButton:hover { background-color: #3a3a3a; }"""
             menu_stylesheet = """QMenu { border: 1px solid #444; } QMenu::separator { height: 1px; background: #444; margin-left: 5px; margin-right: 5px; }"""
             add_btn_stylesheet = """QPushButton#AddTabButton { border: 1px solid #444444; background-color: #2d2d2d; color: #eeeeee; } QPushButton#AddTabButton:hover { background-color: #3a3a3a; }"""
@@ -1414,7 +1485,6 @@ class MainWindow(QMainWindow):
             bar_stylesheet = """QToolBar { background-color: #f0f0f0; border-bottom: 1px solid #cccccc; padding: 2px; spacing: 4px; } QToolBar QPushButton { border: 1px solid #cccccc; border-radius: 4px; background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f6f6f6, stop:1 #e0e0e0); color: black; min-height: 24px; padding: 0 8px; } QToolBar QPushButton:hover { background-color: #e8e8e8; } QToolBar QPushButton:pressed { background-color: #d8d8d8; } QToolBar QLineEdit, QToolBar QComboBox { border: 1px solid #cccccc; border-radius: 4px; background-color: #ffffff; color: black; min-height: 24px; padding: 0 5px; } QToolBar QLabel { color: black; }"""
             corner_stylesheet = """QWidget#CornerWidget { background-color: transparent; } QPushButton { border: 1px solid #cccccc; background-color: #f0f0f0; color: black; } QPushButton:hover { background-color: #e0e0e0; }"""
             tab_stylesheet = """QTabWidget::pane { border-top: 1px solid #cccccc; background: #ffffff; } QTabBar { border-bottom: 1px solid #cccccc; } QTabBar::tab { background-color: #f0f0f0; color: black; border: 1px solid #cccccc; border-bottom: none; padding: 6px 16px; border-top-left-radius: 7px; border-top-right-radius: 7px; margin-right: 2px; } QTabBar::tab:!selected { margin-top: 3px; } QTabBar::tab:!selected:hover { background-color: #e0e0e0; } QTabBar::tab:selected { margin-left: -2px; margin-right: -2px; margin-top: 0px; margin-bottom: -1px; background-color: #ffffff; border-right: 1px solid #a2a2a2; }"""
-            vct_stylesheet = """QFrame#VerseCollectionControlBar { background-color: #f0f0f0; border-top: 1px solid #cccccc; } QFrame#VerseCollectionControlBar QPushButton { color: black; border: 1px solid #cccccc; border-radius: 4px; background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f6f6f6, stop:1 #e0e0e0); min-height: 24px; padding: 0 8px; } QFrame#VerseCollectionControlBar QPushButton:hover { background-color: #e8e8e8; } QFrame#VerseCollectionControlBar QLabel { border: none; }"""
             memo_btn_stylesheet = """QPushButton#MemoTabGoToChapterButton, QPushButton#MemoTabSaveChapterButton, QPushButton#MemoTabSaveBookButton { border: 1px solid #cccccc; border-radius: 4px; background-color: #f0f0f0; color: black; padding: 2px 8px; } QPushButton#MemoTabGoToChapterButton:hover, QPushButton#MemoTabSaveChapterButton:hover, QPushButton#MemoTabSaveBookButton:hover { background-color: #e0e0e0; }"""
             menu_stylesheet = """QMenu { border: 1px solid #ccc; } QMenu::item:selected { background-color: #e0e0e0; } QMenu::separator { height: 1px; background: #ccc; margin-left: 5px; margin-right: 5px; }"""
             add_btn_stylesheet = """QPushButton#AddTabButton { border: 1px solid #cccccc; background-color: #f0f0f0; color: black; } QPushButton#AddTabButton:hover { background-color: #e0e0e0; }"""
@@ -1476,7 +1546,6 @@ class MainWindow(QMainWindow):
         
         self.add_tab_btn.setStyleSheet(add_btn_stylesheet)
         self.tab_widget.setStyleSheet(tab_stylesheet)
-        self.verse_collection_tab.setStyleSheet(vct_stylesheet)
         self.memo_tab.setStyleSheet(memo_btn_stylesheet)
         
         # [추가] 탭 내 컨트롤들에 공용 스타일 적용
@@ -1667,7 +1736,15 @@ class MainWindow(QMainWindow):
         popup = BookChapterPopup(self.data_loader, self, self.current_book, self.current_chapter)
         target_widget = self.get_navigation_target()
         popup.selection_made.connect(lambda book, chap: self.go_to_verse(target_widget, book, chap, 1))
+        popup.text_navigation.connect(self._navigate_from_popup_text)
         popup.move(self.location_btn.mapToGlobal(self.location_btn.rect().bottomLeft())); popup.show()
+
+    @Slot(str)
+    def _navigate_from_popup_text(self, text):
+        book, chapter, verse = self.parse_navigation_input(text)
+        if book and chapter:
+            self.go_to_verse(self.get_navigation_target(), book, chapter,
+                             verse if verse is not None else 1)
 
     @Slot(int)
     def on_comparison_font_size_changed(self, size):
@@ -1707,9 +1784,7 @@ class MainWindow(QMainWindow):
             'composite_crossref_translation': self.composite_tab.crossref_translation_combo.currentText(),
             'composite_crossref_style_mode': self.composite_tab.crossref_style_mode,
             
-            'verse_collection_file': self.verse_collection_tab.file_path, 
-            'verse_collection_font_size': self.verse_collection_tab.font_size, 
-            'search_font_size': self.search_tab.font_size, 
+            'search_font_size': self.search_tab.font_size,
             'theme': theme,
             'comparison_font_size': self.comparison_font_size,
             'default_start_tab': self._settings.get('default_start_tab', 0),
@@ -1749,10 +1824,10 @@ class MainWindow(QMainWindow):
     def update_default_tab_indicator(self):
         """기본 시작 탭에 작은 점(·) 표시를 붙이고, 해당 탭 툴팁에 '시작 시 기본 탭' 문구를 추가."""
         DEFAULT_TAB_MARKER = " •"  # 불릿(·보다 약간 굵은 점)
-        FIXED_TAB_LABELS = ("통합", "읽기", "검색", "주석", "관주", "편집", "메모")
+        FIXED_TAB_LABELS = ("통합", "읽기", "검색", "주석", "관주", "메모", "원어")
         FIXED_TAB_TOOLTIPS = (
             "통합 탭으로 이동 (F10)", "읽기 탭으로 이동 (F2)", "검색 탭으로 이동 (F3)",
-            "주석 탭으로 이동 (F4)", "관주 탭으로 이동 (F5)", "편집 탭으로 이동 (F6)", "메모 탭으로 이동 (F7)"
+            "주석 탭으로 이동 (F4)", "관주 탭으로 이동 (F5)", "메모 탭으로 이동 (F7)", "원어 탭으로 이동 (F11)"
         )
         default_idx = min(self._settings.get('default_start_tab', 0), max(0, self.tab_widget.count() - 1))
         for i in range(self.tab_widget.count()):
@@ -1905,19 +1980,6 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, lambda: new_tab.navigate_to(book, chapter))
             QTimer.singleShot(100, lambda: new_tab.scroll_to_verse(verse))
 
-    @Slot(object, str, str)
-    def send_selected_text_to_verse_collection(self, source, text, source_description):
-        self.verse_collection_tab.append_text(text)
-        message_context = source_description if source_description else "선택한 내용"
-        message = f"'{message_context}'을(를) '편집' 탭에 보냈습니다."
-        if isinstance(source, SharedBibleView):
-            if source in self.read_tab.get_bible_views(): self.read_tab.show_temporary_message(message)
-            elif source is self.commentary_tab.bible_view: self.commentary_tab.show_temporary_message(message)
-            elif source is self.crossref_tab.bible_view: self.crossref_tab.show_temporary_message(message)
-            elif source is self.composite_tab.bible_view: self.composite_tab.show_temporary_message(message)
-        elif isinstance(source, (SearchTab, CommentaryTab, CrossRefTab, AdditionalReadTab, CompositeTab)):
-            source.show_temporary_message(message)
-
     @Slot(str)
     def on_request_send_to_word(self, text): self.send_to_word(text)
 
@@ -1940,8 +2002,7 @@ class MainWindow(QMainWindow):
             
     @Slot(object, str)
     def on_request_send_to_powerpoint(self, source, text):
-        if isinstance(source, VerseCollectionTab): self.send_collection_to_powerpoint(text)
-        else: self.send_to_powerpoint(text)
+        self.send_to_powerpoint(text)
 
     def send_to_powerpoint(self, text: str):
         if win32com is None:
@@ -1960,39 +2021,6 @@ class MainWindow(QMainWindow):
                     shape.TextFrame.TextRange.Text = text
                     break
             new_slide.Select()
-            pp_app.Activate()
-        except com_error as e: QMessageBox.critical(self, "MS PowerPoint 오류", f"Microsoft PowerPoint를 실행하거나 제어하는 중 오류가 발생했습니다.\n설치 여부를 확인하세요.\n\n오류: {e}")
-        except Exception as e: QMessageBox.critical(self, "오류", f"알 수 없는 오류가 발생했습니다: {e}")
-        finally: pythoncom.CoUninitialize()
-
-    def send_collection_to_powerpoint(self, text: str):
-        if win32com is None:
-            QMessageBox.warning(self, "기능 오류", "이 기능을 사용하려면 pywin32 라이브러리가 필요합니다.\n'pip install pywin32'를 실행하여 설치하세요.")
-            return
-        try:
-            pythoncom.CoInitialize()
-            pp_app = win32com.client.Dispatch("PowerPoint.Application")
-            pp_app.Visible = True
-            if pp_app.Presentations.Count == 0: presentation = pp_app.Presentations.Add()
-            else: presentation = pp_app.ActivePresentation
-            slide_blocks = re.split(r'\n\s*\n', text.strip())
-            for block in slide_blocks:
-                if not block.strip(): continue
-                slide_index = presentation.Slides.Count + 1
-                new_slide = presentation.Slides.Add(slide_index, 2)
-                title_text = ""
-                content_lines = []
-                lines = block.strip().split('\n')
-                verse_pattern = re.compile(r'^\s*\(?[가-힣A-Za-z]+\s*\d+:\s*\d+\)?|^\s*\d+\.')
-                for line in lines:
-                    if not verse_pattern.match(line) and not title_text: title_text = line.strip()
-                    else: content_lines.append(line)
-                final_content = '\n'.join(content_lines)
-                if new_slide.Shapes.Title.HasTextFrame: new_slide.Shapes.Title.TextFrame.TextRange.Text = title_text
-                for shape in new_slide.Shapes:
-                    if shape.HasTextFrame and shape.PlaceholderFormat.Type == 2:
-                        shape.TextFrame.TextRange.Text = final_content
-                        break
             pp_app.Activate()
         except com_error as e: QMessageBox.critical(self, "MS PowerPoint 오류", f"Microsoft PowerPoint를 실행하거나 제어하는 중 오류가 발생했습니다.\n설치 여부를 확인하세요.\n\n오류: {e}")
         except Exception as e: QMessageBox.critical(self, "오류", f"알 수 없는 오류가 발생했습니다: {e}")
@@ -2050,7 +2078,6 @@ class MainWindow(QMainWindow):
 
         new_tab.location_changed.connect(self.update_additional_tab_title)
         new_tab.request_search.connect(self.perform_search_with_selection)
-        new_tab.request_add_to_collection.connect(self.send_selected_text_to_verse_collection)
         new_tab.request_send_to_word.connect(self.on_request_send_to_word)
         new_tab.request_send_to_powerpoint.connect(self.on_request_send_to_powerpoint)
         new_tab.request_commentary.connect(self.go_to_commentary_for_verse)

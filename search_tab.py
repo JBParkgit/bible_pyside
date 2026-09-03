@@ -14,7 +14,6 @@ class SearchTab(QWidget):
     request_navigation = Signal(str, int, int)
     request_new_read_tab = Signal(str, int, int) # 신규 시그널
     request_search = Signal(str, str)
-    request_add_to_collection = Signal(object, str, str)
     request_send_to_word = Signal(str)
     request_send_to_powerpoint = Signal(object, str)
 
@@ -94,13 +93,6 @@ class SearchTab(QWidget):
         self.navigate_shortcut.activated.connect(self.navigate_to_current_verse)
 
     # --- 단축키 핸들러 추가 ---
-    def handle_add_to_collection_shortcut(self):
-        cursor = self.results_browser.textCursor()
-        if cursor.hasSelection():
-            text = cursor.selection().toPlainText().strip()
-            range_str = f'"{text[:10]}..."' if len(text) > 10 else f'"{text}"'
-            self.request_add_to_collection.emit(self, text, range_str)
-
     def handle_send_to_word_shortcut(self):
         cursor = self.results_browser.textCursor()
         if cursor.hasSelection():
@@ -204,19 +196,15 @@ class SearchTab(QWidget):
         # ------------------------
 
         s_action = menu.addAction("검색")
-        col_action = menu.addAction("편집으로 보내기 (Ctrl+L)")
         word_action = menu.addAction("MS Word로 보내기 (Ctrl+W)")
         ppt_action = menu.addAction("MS PowerPoint로 보내기 (Ctrl+P)")
         s_action.setEnabled(has_selection)
-        col_action.setEnabled(has_selection)
         word_action.setEnabled(has_selection)
         ppt_action.setEnabled(has_selection)
         if has_selection:
             selected_text_for_search = text_cursor.selectedText()
             text_to_send_for_collection = text_cursor.selection().toPlainText().strip()
-            range_str = f'"{selected_text_for_search[:10]}..."' if len(selected_text_for_search) > 10 else f'"{selected_text_for_search}"'
             s_action.triggered.connect(lambda: self.request_search.emit(selected_text_for_search, self.last_translation))
-            col_action.triggered.connect(lambda: self.request_add_to_collection.emit(self, text_to_send_for_collection, range_str))
             word_action.triggered.connect(lambda: self.request_send_to_word.emit(text_to_send_for_collection))
             ppt_action.triggered.connect(lambda: self.request_send_to_powerpoint.emit(self, text_to_send_for_collection))
         if not menu.isEmpty():

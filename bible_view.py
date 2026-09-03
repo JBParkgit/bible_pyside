@@ -74,11 +74,11 @@ class SharedBibleView(QWidget):
     request_commentary = Signal(str, int, int)
     request_cross_ref = Signal(str, int, int)
     request_search = Signal(str, str)
-    request_add_to_collection = Signal(object, str, str)
     request_send_to_word = Signal(str)
     request_send_to_powerpoint = Signal(object, str)
     request_original_language = Signal(str, int, int, int)
-    request_ai_explanation = Signal(str, str, str)  # (참조, 본문, 번역본이름)
+    # (참조, 본문, 번역본이름, 책, 장, 시작절, 끝절)
+    request_ai_explanation = Signal(str, str, str, str, int, int, int)
 
     def __init__(self, data_loader, available_translations, parent=None, initial_settings=None, is_main_reader=False, context='read', bible_db=None):
         super().__init__(parent)
@@ -261,6 +261,12 @@ class SharedBibleView(QWidget):
     def on_verse_anchor_clicked(self, url: QUrl):
         verse_num = None
         href = url.toString()
+        if href.startswith("ai:"):
+            match = re.match(r"ai:(\d+)-(\d+)", href)
+            if match:
+                start, end = int(match.group(1)), int(match.group(2))
+                self.emit_ai_explanation_for(list(range(start, end + 1)))
+            return
         if href.startswith("#"):
             href = href[1:]
         try:
@@ -349,11 +355,17 @@ class SharedBibleView(QWidget):
 
     def emit_ai_explanation_for(self, verse_numbers):
         """주어진 구절 목록에 대한 AI 해설을 요청한다. (액션바·우클릭 공용)"""
+        verse_numbers = sorted(set(v for v in verse_numbers if v))
+        if not verse_numbers:
+            return
         text, header = self._build_verse_text(verse_numbers)
         if not text:
             return
         passage = text.split("\n", 1)[1] if "\n" in text else text
-        self.request_ai_explanation.emit(header, passage, self.translation_combo.currentText())
+        self.request_ai_explanation.emit(
+            header, passage, self.translation_combo.currentText(),
+            self.current_book, self.current_chapter, verse_numbers[0], verse_numbers[-1],
+        )
 
     @Slot()
     def open_selected_ai_explanation(self):
@@ -474,12 +486,18 @@ class SharedBibleView(QWidget):
         prefix_padding = "padding-left: 5px;" if direction == "rtl" else "padding-right: 5px;"
         
         highlight_color_map = {}
+        ai_note_ranges = {}  # 시작절 -> (시작절, 끝절)
         if self.bible_db:
             highlights = self.bible_db.get_highlights(self.current_book, self.current_chapter)
             highlight_color_map = {
                 h["verse"]: h.get("color") or self._get_highlight_color()
                 for h in highlights
             }
+            try:
+                for note in self.bible_db.get_ai_notes(self.current_book, self.current_chapter):
+                    ai_note_ranges.setdefault(note["start_verse"], (note["start_verse"], note["end_verse"]))
+            except Exception:
+                ai_note_ranges = {}
         selected_verses = set(self._selected_verse_numbers())
         
         # CSS 스타일 추가: 링크와 일반 텍스트의 폰트 굵기를 일치시키기
@@ -527,6 +545,16 @@ class SharedBibleView(QWidget):
             else:
                 verse_prefix = f"<span style='color: {text_color_name}; font-weight: normal;'>{num_label}.</span>"
 
+            # 저장된 AI 해설이 있는 구절에 작은 표시(클릭 시 그 해설을 다시 연다)
+            ai_marker = ""
+            note_range = next((ai_note_ranges[v] for v in range(start_verse, end_verse + 1)
+                               if v in ai_note_ranges), None)
+            if note_range:
+                ai_marker = (
+                    f"<a href='ai:{note_range[0]}-{note_range[1]}' "
+                    f"style='text-decoration:none;' title='저장된 AI 해설 보기'>&nbsp;💬</a>"
+                )
+
             margin_top_style = ""
             if is_after_subtitle:
                 margin_top_style = "margin-top: 25px;"
@@ -549,7 +577,7 @@ class SharedBibleView(QWidget):
             safe_line = html_escape(line) or "&nbsp;"
             num_cell = (
                 f'<td width="1" style="white-space: nowrap; {prefix_padding} vertical-align: top; font-weight: normal; {bg_color_style}">'
-                f"<a href='#{start_verse}' style='text-decoration:none; color:{text_color_name}; font-weight: normal !important;'>{verse_prefix}</a>"
+                f"<a href='#{start_verse}' style='text-decoration:none; color:{text_color_name}; font-weight: normal !important;'>{verse_prefix}</a>{ai_marker}"
                 "</td>"
             )
             align_attr = ' align="right"' if direction == "rtl" else ""
@@ -835,19 +863,16 @@ class SharedBibleView(QWidget):
         menu.addSeparator()
         
         s_action = menu.addAction("검색")
-        col_action = menu.addAction("편집으로 보내기 (Ctrl+L)")
         word_action = menu.addAction("MS Word로 보내기 (Ctrl+W)")
         ppt_action = menu.addAction("MS PowerPoint로 보내기 (Ctrl+P)")
-        
+
         s_action.setEnabled(has_selection)
-        col_action.setEnabled(has_selection)
         word_action.setEnabled(has_selection)
         ppt_action.setEnabled(has_selection)
-        
+
         if has_selection:
             selected_text_for_search = self.text_browser.textCursor().selectedText()
             s_action.triggered.connect(lambda: self.request_search.emit(selected_text_for_search, self.translation_combo.currentText()))
-            col_action.triggered.connect(self.trigger_add_to_collection)
             word_action.triggered.connect(self.trigger_send_to_word)
             ppt_action.triggered.connect(self.trigger_send_to_powerpoint)
             
@@ -886,12 +911,6 @@ class SharedBibleView(QWidget):
             dialog.font_size_changed.connect(main_window.on_comparison_font_size_changed)
             
         dialog.exec()
-
-    @Slot()
-    def trigger_add_to_collection(self):
-        text_to_send, range_str = self._get_formatted_selection()
-        if text_to_send:
-            self.request_add_to_collection.emit(self, text_to_send, range_str)
 
     @Slot()
     def trigger_send_to_word(self):

@@ -15,7 +15,6 @@ class CrossRefTab(QWidget):
     request_navigation = Signal(str, int, int) # '이 구절로 이동' 기능을 위한 시그널 추가
     request_new_read_tab = Signal(str, int, int) # 신규 시그널
     request_search = Signal(str, str)
-    request_add_to_collection = Signal(object, str, str)
     request_send_to_word = Signal(str)
     request_send_to_powerpoint = Signal(object, str)
 
@@ -149,14 +148,6 @@ class CrossRefTab(QWidget):
         # ------------------
 
     # --- 단축키 핸들러 추가 ---
-    def handle_add_to_collection_shortcut(self):
-        if self.bible_view.text_browser.hasFocus():
-            self.bible_view.trigger_add_to_collection()
-        elif self.crossref_text_browser.hasFocus():
-            cursor = self.crossref_text_browser.textCursor()
-            if cursor.hasSelection():
-                self.request_add_to_collection.emit(self, cursor.selection().toPlainText().strip(), "관주 내용")
-
     def handle_send_to_word_shortcut(self):
         if self.bible_view.text_browser.hasFocus():
             self.bible_view.trigger_send_to_word()
@@ -217,18 +208,15 @@ class CrossRefTab(QWidget):
         # ------------------------
 
         search_action = menu.addAction("검색")
-        collection_action = menu.addAction("편집으로 보내기 (Ctrl+L)")
         word_action = menu.addAction("MS Word로 보내기 (Ctrl+W)")
         ppt_action = menu.addAction("MS PowerPoint로 보내기 (Ctrl+P)")
         search_action.setEnabled(has_selection)
-        collection_action.setEnabled(has_selection)
         word_action.setEnabled(has_selection)
         ppt_action.setEnabled(has_selection)
         if has_selection:
             selected_text = text_cursor.selection().toPlainText().strip()
             search_translation = self.crossref_translation_combo.currentText()
             search_action.triggered.connect(lambda: self.request_search.emit(selected_text, search_translation))
-            collection_action.triggered.connect(lambda: self.request_add_to_collection.emit(self, selected_text, "관주 내용"))
             word_action.triggered.connect(lambda: self.request_send_to_word.emit(selected_text))
             ppt_action.triggered.connect(lambda: self.request_send_to_powerpoint.emit(self, selected_text))
         menu.exec(self.crossref_text_browser.mapToGlobal(pos))

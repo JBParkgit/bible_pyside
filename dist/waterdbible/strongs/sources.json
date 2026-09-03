@@ -1,0 +1,20 @@
+{
+  "kjv": {
+    "title": "King James (Authorized) Version, KJV2006 with Strong's numbers",
+    "url": "https://ebible.org/Scriptures/eng-kjv2006_usfm.zip",
+    "license": "Public Domain outside the United Kingdom",
+    "attribution": "Courtesy of CrossWire Bible Society and eBible.org"
+  },
+  "lexicon": {
+    "title": "STEPBible TBESH/TBESG lexicons",
+    "url": "https://github.com/STEPBible/STEPBible-Data",
+    "license": "CC BY 4.0",
+    "attribution": "STEP Bible, www.STEPBible.org"
+  },
+  "original": {
+    "title": "STEPBible TOTHT/TAGNT complete original-language text",
+    "url": "https://github.com/STEPBible/STEPBible-Data",
+    "license": "CC BY 4.0",
+    "attribution": "STEP Bible, www.STEPBible.org"
+  }
+}
