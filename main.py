@@ -13,15 +13,15 @@ except ImportError:
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLineEdit, QLabel, QTabWidget, QTextBrowser,
-    QComboBox, QSplitter, QFrame, QListWidget, QListWidgetItem,
+    QComboBox, QSplitter, QFrame,
     QRadioButton, QButtonGroup, QMenu, QMessageBox,
     QFontDialog, QDialog, QGridLayout, QFileDialog, QToolBar, QSizePolicy,
-    QTabBar, QSlider
+    QTabBar
 )
 from PySide6.QtCore import Qt, Signal, Slot, QEvent, QTimer, QSize
 from PySide6.QtGui import (
     QFont, QCloseEvent, QPalette, QAction, QActionGroup, QTextOption,
-    QFontDatabase, QIcon, QKeySequence, QShortcut, QColor, QPainter, QPen
+    QIcon, QKeySequence, QShortcut, QColor, QPainter, QPen
 )
 
 from data_loaders import BibleDataLoader, CommentaryDataLoader, CrossrefDataLoader
@@ -254,161 +254,6 @@ class TextExtractorDialog(QDialog):
             QMessageBox.information(self, "저장 완료", f"본문을 '{os.path.basename(file_path)}' 파일로 저장했습니다.")
         except Exception as e:
             QMessageBox.critical(self, "오류", f"본문 추출 중 오류가 발생했습니다: {e}")
-
-class FontSettingsDialog(QDialog):
-    def __init__(self, current_font_family, read_font_size, commentary_font_size, crossref_font_size, composite_commentary_font_size, composite_crossref_font_size, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("폰트 및 글자 크기 설정")
-        self.setFixedSize(400, 650)
-
-        main_layout = QVBoxLayout(self)
-
-        font_group_box = QFrame(self)
-        font_group_box_layout = QVBoxLayout(font_group_box)
-        font_group_box.setFrameShape(QFrame.Shape.StyledPanel)
-        font_group_box.setFrameShadow(QFrame.Shadow.Raised)
-        
-        font_group_box_layout.addWidget(QLabel("폰트 선택:"))
-        self.font_list = QListWidget()
-        self.font_list.setMaximumHeight(120)
-        font_families = QFontDatabase.families()
-        self.font_list.addItems(font_families)
-        
-        items = self.font_list.findItems(current_font_family, Qt.MatchFlag.MatchExactly)
-        if items:
-            self.font_list.setCurrentItem(items[0])
-            self.font_list.scrollToItem(items[0])
-        font_group_box_layout.addWidget(self.font_list)
-        main_layout.addWidget(font_group_box)
-
-        size_group_box = QFrame(self)
-        size_group_box_layout = QVBoxLayout(size_group_box)
-        size_group_box.setFrameShape(QFrame.Shape.StyledPanel)
-        size_group_box.setFrameShadow(QFrame.Shadow.Raised)
-
-        size_group_box_layout.addWidget(QLabel("글자 크기 설정:"))
-
-        # 읽기 탭
-        size_group_box_layout.addWidget(QLabel("읽기 탭:"))
-        self.read_font_size_slider = QSlider(Qt.Orientation.Horizontal)
-        self.read_font_size_slider.setMinimum(8)
-        self.read_font_size_slider.setMaximum(30)
-        self.read_font_size_slider.setValue(read_font_size)
-        self.read_font_size_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.read_font_size_slider.setTickInterval(1)
-        self.read_font_size_label = QLabel(str(read_font_size))
-        self.read_font_size_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.read_font_size_label.setMinimumWidth(30)
-        read_size_layout = QHBoxLayout()
-        read_size_layout.addWidget(self.read_font_size_slider)
-        read_size_layout.addWidget(self.read_font_size_label)
-        size_group_box_layout.addLayout(read_size_layout)
-        size_group_box_layout.addSpacing(10)
-
-        # 주석 탭
-        size_group_box_layout.addWidget(QLabel("주석 탭:"))
-        self.commentary_font_size_slider = QSlider(Qt.Orientation.Horizontal)
-        self.commentary_font_size_slider.setMinimum(8)
-        self.commentary_font_size_slider.setMaximum(30)
-        self.commentary_font_size_slider.setValue(commentary_font_size)
-        self.commentary_font_size_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.commentary_font_size_slider.setTickInterval(1)
-        self.commentary_font_size_label = QLabel(str(commentary_font_size))
-        self.commentary_font_size_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.commentary_font_size_label.setMinimumWidth(30)
-        commentary_size_layout = QHBoxLayout()
-        commentary_size_layout.addWidget(self.commentary_font_size_slider)
-        commentary_size_layout.addWidget(self.commentary_font_size_label)
-        size_group_box_layout.addLayout(commentary_size_layout)
-        size_group_box_layout.addSpacing(10)
-
-        # 관주 탭
-        size_group_box_layout.addWidget(QLabel("관주 탭:"))
-        self.crossref_font_size_slider = QSlider(Qt.Orientation.Horizontal)
-        self.crossref_font_size_slider.setMinimum(8)
-        self.crossref_font_size_slider.setMaximum(30)
-        self.crossref_font_size_slider.setValue(crossref_font_size)
-        self.crossref_font_size_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.crossref_font_size_slider.setTickInterval(1)
-        self.crossref_font_size_label = QLabel(str(crossref_font_size))
-        self.crossref_font_size_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.crossref_font_size_label.setMinimumWidth(30)
-        crossref_size_layout = QHBoxLayout()
-        crossref_size_layout.addWidget(self.crossref_font_size_slider)
-        crossref_size_layout.addWidget(self.crossref_font_size_label)
-        size_group_box_layout.addLayout(crossref_size_layout)
-        size_group_box_layout.addSpacing(10)
-
-        # 통합 탭 - 주석
-        size_group_box_layout.addWidget(QLabel("통합 탭 - 주석:"))
-        self.composite_commentary_font_size_slider = QSlider(Qt.Orientation.Horizontal)
-        self.composite_commentary_font_size_slider.setMinimum(8)
-        self.composite_commentary_font_size_slider.setMaximum(30)
-        self.composite_commentary_font_size_slider.setValue(composite_commentary_font_size)
-        self.composite_commentary_font_size_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.composite_commentary_font_size_slider.setTickInterval(1)
-        self.composite_commentary_font_size_label = QLabel(str(composite_commentary_font_size))
-        self.composite_commentary_font_size_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.composite_commentary_font_size_label.setMinimumWidth(30)
-        composite_commentary_size_layout = QHBoxLayout()
-        composite_commentary_size_layout.addWidget(self.composite_commentary_font_size_slider)
-        composite_commentary_size_layout.addWidget(self.composite_commentary_font_size_label)
-        size_group_box_layout.addLayout(composite_commentary_size_layout)
-        size_group_box_layout.addSpacing(10)
-
-        # 통합 탭 - 관주
-        size_group_box_layout.addWidget(QLabel("통합 탭 - 관주:"))
-        self.composite_crossref_font_size_slider = QSlider(Qt.Orientation.Horizontal)
-        self.composite_crossref_font_size_slider.setMinimum(8)
-        self.composite_crossref_font_size_slider.setMaximum(30)
-        self.composite_crossref_font_size_slider.setValue(composite_crossref_font_size)
-        self.composite_crossref_font_size_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-        self.composite_crossref_font_size_slider.setTickInterval(1)
-        self.composite_crossref_font_size_label = QLabel(str(composite_crossref_font_size))
-        self.composite_crossref_font_size_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.composite_crossref_font_size_label.setMinimumWidth(30)
-        composite_crossref_size_layout = QHBoxLayout()
-        composite_crossref_size_layout.addWidget(self.composite_crossref_font_size_slider)
-        composite_crossref_size_layout.addWidget(self.composite_crossref_font_size_label)
-        size_group_box_layout.addLayout(composite_crossref_size_layout)
-
-        main_layout.addWidget(size_group_box)
-
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-        self.ok_button = QPushButton("확인")
-        self.cancel_button = QPushButton("취소")
-        button_layout.addWidget(self.ok_button)
-        button_layout.addWidget(self.cancel_button)
-        main_layout.addLayout(button_layout)
-
-        self.ok_button.clicked.connect(self.accept)
-        self.cancel_button.clicked.connect(self.reject)
-        self.read_font_size_slider.valueChanged.connect(lambda value: self.read_font_size_label.setText(str(value)))
-        self.commentary_font_size_slider.valueChanged.connect(lambda value: self.commentary_font_size_label.setText(str(value)))
-        self.crossref_font_size_slider.valueChanged.connect(lambda value: self.crossref_font_size_label.setText(str(value)))
-        self.composite_commentary_font_size_slider.valueChanged.connect(lambda value: self.composite_commentary_font_size_label.setText(str(value)))
-        self.composite_crossref_font_size_slider.valueChanged.connect(lambda value: self.composite_crossref_font_size_label.setText(str(value)))
-
-    def selectedFontFamily(self):
-        if self.font_list.currentItem():
-            return self.font_list.currentItem().text()
-        return None
-
-    def selectedReadFontSize(self):
-        return self.read_font_size_slider.value()
-
-    def selectedCommentaryFontSize(self):
-        return self.commentary_font_size_slider.value()
-
-    def selectedCrossrefFontSize(self):
-        return self.crossref_font_size_slider.value()
-
-    def selectedCompositeCommentaryFontSize(self):
-        return self.composite_commentary_font_size_slider.value()
-
-    def selectedCompositeCrossrefFontSize(self):
-        return self.composite_crossref_font_size_slider.value()
 
 class ReadTab(QWidget):
     view_count_changed = Signal(int)
@@ -885,11 +730,8 @@ class MainWindow(QMainWindow):
             if i == initial_verse_display_mode: action.setChecked(True)
         self.verse_style_combo.setCurrentIndex(initial_verse_display_mode)
         
-        self.font_settings_action = QAction("폰트 및 글자 크기 설정...", self)
+        self.font_settings_action = QAction("본문 및 글꼴 설정...", self)
         settings_menu.addAction(self.font_settings_action)
-
-        self.body_style_action = QAction("본문 보기 설정...", self)
-        settings_menu.addAction(self.body_style_action)
 
         self.ai_settings_action = QAction("AI 설명 설정 (Gemini)...", self)
         settings_menu.addAction(self.ai_settings_action)
@@ -936,8 +778,7 @@ class MainWindow(QMainWindow):
         self.history_forward_long_press_timer.timeout.connect(self.show_forward_history_menu)
 
         self.theme_action_group.triggered.connect(self.on_theme_action_triggered)
-        self.font_settings_action.triggered.connect(self.open_font_settings_dialog)
-        self.body_style_action.triggered.connect(self.open_body_style_dialog)
+        self.font_settings_action.triggered.connect(self.open_appearance_dialog)
         self.ai_settings_action.triggered.connect(self.open_ai_settings_dialog)
         self.extract_action.triggered.connect(self.open_text_extractor)
         self.read_mode_btn.clicked.connect(self.open_read_mode)
@@ -1113,49 +954,6 @@ class MainWindow(QMainWindow):
         self.composite_tab.bible_view.set_font_size(size) # <<< 수정됨
         self.save_settings()
 
-    @Slot()
-    def open_font_settings_dialog(self):
-        bible_views = self.read_tab.get_bible_views()
-        current_read_font_size = bible_views[0].font_size if bible_views else 14
-        current_commentary_font_size = self.commentary_tab.font_size
-        current_crossref_font_size = self.crossref_tab.crossref_font_size
-        current_composite_commentary_font_size = self.composite_tab.commentary_font_size
-        current_composite_crossref_font_size = self.composite_tab.crossref_font_size
-        
-        dialog = FontSettingsDialog(
-            self.font_family, 
-            current_read_font_size,
-            current_commentary_font_size,
-            current_crossref_font_size,
-            current_composite_commentary_font_size,
-            current_composite_crossref_font_size,
-            self
-        )
-        if dialog.exec():
-            selected_family = dialog.selectedFontFamily()
-            selected_read_font_size = dialog.selectedReadFontSize()
-            selected_commentary_font_size = dialog.selectedCommentaryFontSize()
-            selected_crossref_font_size = dialog.selectedCrossrefFontSize()
-            selected_composite_commentary_font_size = dialog.selectedCompositeCommentaryFontSize()
-            selected_composite_crossref_font_size = dialog.selectedCompositeCrossrefFontSize()
-            
-            if selected_family:
-                self.font_family = selected_family
-                self.apply_global_font()
-            
-            # 읽기 탭 폰트 크기
-            self.sync_font_size(selected_read_font_size)
-            # 주석 탭 폰트 크기
-            self.commentary_tab.set_commentary_font_size(selected_commentary_font_size)
-            # 관주 탭 폰트 크기
-            self.crossref_tab.set_crossref_font_size(selected_crossref_font_size)
-            # 통합 탭 주석 폰트 크기
-            self.composite_tab.set_commentary_font_size(selected_composite_commentary_font_size)
-            # 통합 탭 관주 폰트 크기
-            self.composite_tab.set_crossref_font_size(selected_composite_crossref_font_size)
-            
-            self.save_settings()
-
     def _body_style_sample_verses(self):
         """현재 읽고 있는 본문 앞부분을 미리보기 표본으로 만든다 (실패 시 None)."""
         try:
@@ -1184,31 +982,53 @@ class MainWindow(QMainWindow):
         except Exception:
             return None
 
-    def open_body_style_dialog(self):
+    @Slot()
+    def open_appearance_dialog(self):
+        """'본문 및 글꼴 설정' 창 (글꼴 + 본문 타이포그래피 통합)."""
         t = getattr(self, '_theme_tokens', None) or TOKENS['light']
         colors = {
             "text": t["text"], "muted": t["text_secondary"],
             "accent": t["accent"], "bg": t["surface"],
         }
         views = self.read_tab.get_bible_views()
-        font_pt = views[0].font_size if views else self._settings.get('bible_font_size', 14)
+        bible_font_size = views[0].font_size if views else self._settings.get('bible_font_size', 14)
+        aux_font_size = getattr(self.commentary_tab, 'font_size', 12)
         dialog = BodyStyleDialog(
             current_style=getattr(self, '_body_style', None) or body_style_from_settings(self._settings),
             sample_verses=self._body_style_sample_verses(),
             colors=colors,
             font_family=self.font_family,
-            font_pt=font_pt,
+            bible_font_size=bible_font_size,
+            aux_font_size=aux_font_size,
             parent=self,
         )
-        dialog.applied.connect(self._apply_body_style)
+        dialog.applied.connect(self._apply_appearance)
         dialog.exec()
 
     @Slot(dict)
-    def _apply_body_style(self, style):
-        self._body_style = dict(style)
+    def _apply_appearance(self, values):
+        values = dict(values)
+        family = values.pop('font_family', None)
+        bible_size = values.pop('bible_font_size', None)
+        aux_size = values.pop('aux_font_size', None)
+
+        if family and family != self.font_family:
+            self.font_family = family
+            self.apply_global_font()
+        if bible_size:
+            self.sync_font_size(int(bible_size))
+        if aux_size:
+            aux_size = int(aux_size)
+            self.commentary_tab.set_commentary_font_size(aux_size)
+            self.crossref_tab.set_crossref_font_size(aux_size)
+            self.composite_tab.set_commentary_font_size(aux_size)
+            self.composite_tab.set_crossref_font_size(aux_size)
+
+        # 나머지 키는 본문 타이포그래피
+        self._body_style = dict(values)
         for view in self._all_bible_views():
             if hasattr(view, 'apply_body_style'):
-                view.apply_body_style(style)
+                view.apply_body_style(values)
         self.save_settings()
 
     # --- AI 설명 (Gemini) ---------------------------------------------------
@@ -1644,7 +1464,10 @@ class MainWindow(QMainWindow):
         target_widget = self.get_navigation_target()
         popup.selection_made.connect(lambda book, chap: self.go_to_verse(target_widget, book, chap, 1))
         popup.text_navigation.connect(self._navigate_from_popup_text)
-        popup.move(self.location_btn.mapToGlobal(self.location_btn.rect().bottomLeft())); popup.show()
+        popup.move(self.location_btn.mapToGlobal(self.location_btn.rect().bottomLeft()))
+        popup.show()
+        popup.raise_()
+        popup.activateWindow()
 
     @Slot(str)
     def _navigate_from_popup_text(self, text):

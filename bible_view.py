@@ -2,13 +2,14 @@
 import re
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextBrowser,
-    QComboBox, QLabel, QPushButton, QFrame, QApplication, QMenu
+    QComboBox, QLabel, QPushButton, QFrame, QApplication, QMenu, QSizePolicy,
+    QScrollArea
 )
 from PySide6.QtCore import Qt, Signal, Slot, QUrl, QPoint, QSize, QTimer
 from PySide6.QtGui import QFont, QTextOption, QPalette, QTextCursor, QKeySequence, QKeyEvent, QIcon
 
 from html_utils import apply_text_layout, get_text_alignment, get_text_direction, html_escape
-from body_style import body_style_from_settings, SERIF_STACK
+from body_style import body_style_from_settings
 
 
 HIGHLIGHT_COLORS = {
@@ -161,12 +162,33 @@ class SharedBibleView(QWidget):
     def init_selection_bar(self, layout):
         self.selection_bar = QFrame()
         self.selection_bar.setObjectName("selectionBar")
-        selection_layout = QHBoxLayout(self.selection_bar)
-        selection_layout.setContentsMargins(8, 6, 8, 6)
+        self.selection_bar.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        bar_outer = QHBoxLayout(self.selection_bar)
+        bar_outer.setContentsMargins(6, 2, 6, 2)
+        bar_outer.setSpacing(0)
+
+        # 좁은 읽기 창에서도 창 너비를 강제로 늘리지 않도록, 내용은 가로 스크롤로 담는다.
+        self._selection_scroll = QScrollArea()
+        self._selection_scroll.setObjectName("selectionScroll")
+        self._selection_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._selection_scroll.setWidgetResizable(True)
+        self._selection_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._selection_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._selection_scroll.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self._selection_scroll.setFixedHeight(36)
+        self._selection_scroll.viewport().setAutoFillBackground(False)
+        bar_outer.addWidget(self._selection_scroll)
+
+        content = QWidget()
+        content.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        selection_layout = QHBoxLayout(content)
+        selection_layout.setContentsMargins(2, 0, 2, 0)
         selection_layout.setSpacing(6)
+        selection_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
 
         self.selection_reference_label = QLabel()
         self.selection_reference_label.setObjectName("selectionReferenceLabel")
+        self.selection_reference_label.setMinimumWidth(0)
         selection_layout.addWidget(self.selection_reference_label)
         selection_layout.addStretch(1)
 
@@ -176,34 +198,27 @@ class SharedBibleView(QWidget):
         self.selection_original_button = QPushButton("원어")
         self.selection_ai_button = QPushButton("설명")
         self.selection_ai_button.setToolTip("선택한 구절에 대한 AI 해설 보기 (Gemini)")
-        self.selection_word_button = QPushButton("워드")
-        self.selection_word_button.setToolTip("선택한 구절을 MS Word로 보내기")
-        self.selection_ppt_button = QPushButton("PPT")
-        self.selection_ppt_button.setToolTip("선택한 구절을 MS PowerPoint로 보내기")
         for button in [
             self.selection_copy_button,
             self.selection_compare_button,
             self.selection_original_button,
             self.selection_ai_button,
-            self.selection_word_button,
-            self.selection_ppt_button,
         ]:
-            button.setFixedHeight(28)
             selection_layout.addWidget(button)
 
         self.highlight_color_buttons = {}
         for key, (label, color) in HIGHLIGHT_COLORS.items():
             button = QPushButton()
-            button.setFixedSize(28, 28)
+            button.setFixedSize(16, 16)
             button.setToolTip(f"{label} 하이라이트")
-            button.setStyleSheet(f"background-color: {color}; border: 1px solid #8c959f;")
+            button.setStyleSheet(f"background-color: {color}; border: 1px solid #8c959f; border-radius: 4px;")
             self.highlight_color_buttons[key] = button
             selection_layout.addWidget(button)
 
         self.selection_clear_button = QPushButton("닫기")
-        self.selection_clear_button.setFixedHeight(28)
         selection_layout.addWidget(self.selection_clear_button)
 
+        self._selection_scroll.setWidget(content)
         self.selection_bar.hide()
         layout.addWidget(self.selection_bar)
 
@@ -219,8 +234,6 @@ class SharedBibleView(QWidget):
         self.selection_compare_button.clicked.connect(self.open_selected_comparison)
         self.selection_original_button.clicked.connect(self.open_selected_original_language)
         self.selection_ai_button.clicked.connect(self.open_selected_ai_explanation)
-        self.selection_word_button.clicked.connect(self.send_selected_to_word)
-        self.selection_ppt_button.clicked.connect(self.send_selected_to_powerpoint)
         self.selection_clear_button.clicked.connect(lambda: self.clear_verse_selection())
         for key, button in self.highlight_color_buttons.items():
             button.clicked.connect(lambda checked=False, color_key=key: self.set_selected_highlight_color(color_key))
@@ -406,22 +419,6 @@ class SharedBibleView(QWidget):
     def open_selected_ai_explanation(self):
         self.emit_ai_explanation_for(self._selected_verse_numbers())
 
-    @Slot()
-    def send_selected_to_word(self):
-        text, _ = self._build_selected_verse_text()
-        if not text:
-            return
-        self.request_send_to_word.emit(text)
-        self._show_selection_message("워드로 보냄")
-
-    @Slot()
-    def send_selected_to_powerpoint(self):
-        text, _ = self._build_selected_verse_text()
-        if not text:
-            return
-        self.request_send_to_powerpoint.emit(self, text)
-        self._show_selection_message("PPT로 보냄")
-
     def set_selected_highlight_color(self, color_key):
         selected = self._selected_verse_numbers()
         if not selected or not self.bible_db:
@@ -573,7 +570,6 @@ class SharedBibleView(QWidget):
         subtitle_accent = bstyle.get("subtitle_accent", True)
         accent_color = QApplication.palette().color(QPalette.ColorRole.Link).name()
         subtitle_color = accent_color if subtitle_accent else text_color_name
-        font_family_css = f"font-family: {SERIF_STACK};" if bstyle.get("font_kind") == "serif" else ""
 
         # CSS 스타일 추가: 링크와 일반 텍스트의 폰트 굵기를 일치시키기
         html_content.append(
@@ -581,7 +577,7 @@ class SharedBibleView(QWidget):
             "a { font-weight: normal !important; } "
             "td { font-weight: normal !important; } "
             "table { font-weight: normal !important; } "
-            f"body {{ direction: {direction}; {font_family_css} }}"
+            f"body {{ direction: {direction}; }}"
             "</style>"
         )
         
@@ -620,7 +616,9 @@ class SharedBibleView(QWidget):
             elif self.verse_display_mode == 1:
                 verse_prefix = f"<span style='{num_style}'>{safe_book_abbr} {self.current_chapter}:{num_label}</span>"
             else:
-                verse_prefix = f"<span style='{num_style}'>{num_label}.</span>"
+                # 절 번호만: 점 없이, 본문과 구분되도록 강조색으로 표시
+                marker_style = f"color: {accent_color}; font-weight: bold; font-size: {num_scale}%;"
+                verse_prefix = f"<span style='{marker_style}'>{num_label}</span>"
 
             # 저장된 AI 해설이 있는 구절에 작은 표시(클릭 시 그 해설을 다시 연다)
             ai_marker = ""

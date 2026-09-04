@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QLineEdit, QListWidget, QListWidgetItem, QFrame,
     QVBoxLayout, QAbstractItemView
 )
-from PySide6.QtCore import Qt, Signal, QEvent
+from PySide6.QtCore import Qt, Signal, QEvent, QTimer
 
 class BookChapterPopup(QWidget):
     """
@@ -13,8 +13,16 @@ class BookChapterPopup(QWidget):
     text_navigation = Signal(str)  # 수동 입력 이동 (예: "창1:1")
 
     def __init__(self, data_loader, parent=None, current_book=None, current_chapter=None):
-        super().__init__(parent, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
+        # Qt.Popup 창은 활성화되지 않아 한글(IME) 입력 조합이 되지 않는다.
+        # Qt.Tool 로 띄우고, 바깥 클릭 시 닫히는 동작은 event()에서 직접 처리한다.
+        super().__init__(
+            parent,
+            Qt.WindowType.Tool
+            | Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.NoDropShadowWindowHint,
+        )
         self.data_loader = data_loader
+        self._ready = False  # 표시 직후의 순간적 비활성화로 자동 닫힘 방지
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground); self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.main_frame = QFrame(self); self.main_frame.setObjectName("mainFrame")
         self.main_frame.setStyleSheet("#mainFrame { border: 1px solid palette(mid); border-radius: 8px; background-color: palette(base); }")
@@ -50,6 +58,24 @@ class BookChapterPopup(QWidget):
                     self.chapter_list.scrollToItem(chapter_item, QAbstractItemView.ScrollHint.PositionAtCenter)
         self.nav_input.setFocus()
 
+    def showEvent(self, e):
+        super().showEvent(e)
+        # Tool 창이 실제로 활성화돼야 IME(한글 조합)가 입력창에 붙는다.
+        self.raise_()
+        self.activateWindow()
+        QTimer.singleShot(0, self._focus_input)
+        QTimer.singleShot(200, lambda: setattr(self, "_ready", True))
+
+    def _focus_input(self):
+        self.activateWindow()
+        self.nav_input.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
+
+    def keyPressEvent(self, e):
+        if e.key() == Qt.Key.Key_Escape:
+            self.close()
+            return
+        super().keyPressEvent(e)
+
     def _on_nav_input(self):
         text = self.nav_input.text().strip()
         if text:
@@ -64,5 +90,6 @@ class BookChapterPopup(QWidget):
         book_item = self.book_list.currentItem(); book_name = book_item.data(Qt.ItemDataRole.UserRole)
         self.selection_made.emit(book_name, int(item.text())); self.close()
     def event(self, e):
-        if e.type() == QEvent.Type.WindowDeactivate: self.close()
+        if e.type() == QEvent.Type.WindowDeactivate and self._ready:
+            self.close()
         return super().event(e)

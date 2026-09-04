@@ -52,7 +52,8 @@ class CompositeTab(QWidget):
         self.crossref_collapsed = False
         self.commentary_saved_size = 1000
         self.crossref_saved_size = 1000
-        self.MIN_COLLAPSED_WIDTH = 150  # 접힘 상태 최소 폭
+        self.MIN_COLLAPSED_WIDTH = 34   # 접힘 상태 폭 (접기 버튼만 보이는 얇은 띠)
+        self.MIN_EXPANDED_WIDTH = 200   # 펼침 상태 최소 폭
 
         # 상태 표시줄 타이머
         self.status_timer = QTimer(self)
@@ -107,9 +108,9 @@ class CompositeTab(QWidget):
         # <<< 수정됨: 세 창의 크기를 동일하게 1:1:1 비율로 설정 (큰 값으로)
         self.splitter.setSizes([1000, 1000, 1000])
         
-        # 최소 폭 설정 (접기 시 컨트롤 바만 보이도록)
-        self.commentary_widget.setMinimumWidth(self.MIN_COLLAPSED_WIDTH)
-        self.crossref_widget.setMinimumWidth(self.MIN_COLLAPSED_WIDTH)
+        # 최소 폭 설정 (시작은 펼침 상태)
+        self.commentary_widget.setMinimumWidth(self.MIN_EXPANDED_WIDTH)
+        self.crossref_widget.setMinimumWidth(self.MIN_EXPANDED_WIDTH)
 
     # --- commentary_tab.py에서 복사 ---
     def _create_commentary_view_widget(self):
@@ -118,46 +119,45 @@ class CompositeTab(QWidget):
         layout.setContentsMargins(2, 2, 2, 2)
         layout.setSpacing(2)
         
-        control_bar = QHBoxLayout()
-        control_bar.setContentsMargins(2, 2, 2, 2)
-        
-        # 접기/펼치기 버튼 추가
-        self.commentary_collapse_btn = QPushButton("▼")
-        self.commentary_collapse_btn.setFixedSize(24, 24); self.commentary_collapse_btn.setProperty("compact", "true")
+        # 접기/펼치기 버튼 — 항상 보이는 얇은 상단 줄
+        self.commentary_collapse_btn = QPushButton("▾")
+        self.commentary_collapse_btn.setProperty("collapseButton", "true")
+        self.commentary_collapse_btn.setFixedSize(28, 22)
         self.commentary_collapse_btn.setToolTip("주석 영역 접기/펼치기")
-        control_bar.addWidget(self.commentary_collapse_btn)
-        control_bar.addSpacing(5)
-        
+        btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(0, 0, 0, 0)
+        btn_row.addWidget(self.commentary_collapse_btn)
+        btn_row.addStretch(1)
+        layout.addLayout(btn_row)
+
+        # 펼침 상태에서만 보이는 컨트롤 바
+        self.commentary_control_bar = QWidget()
+        control_bar = QHBoxLayout(self.commentary_control_bar)
+        control_bar.setContentsMargins(2, 0, 2, 2)
+
         self.hokma_label = QLabel("호크마주석")
         self.hokma_label.setStyleSheet("font-weight: bold;")
         control_bar.addWidget(self.hokma_label)
         control_bar.addSpacing(10)
-        
+
         self.verse_commentary_radio = QRadioButton("절")
         self.chapter_commentary_radio = QRadioButton("장")
         self.commentary_mode_group = QButtonGroup(self)
         self.commentary_mode_group.addButton(self.verse_commentary_radio, 0)
         self.commentary_mode_group.addButton(self.chapter_commentary_radio, 1)
         self.verse_commentary_radio.setChecked(True)
-        
+
         control_bar.addWidget(self.verse_commentary_radio)
         control_bar.addWidget(self.chapter_commentary_radio)
-        
+
         self.commentary_location_label = QLabel("")
         self.commentary_location_label.setStyleSheet("font-weight: bold; font-size: 10pt; margin-top: 4px; margin-bottom: 4px;")
         self.commentary_location_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         control_bar.addStretch(1)
         control_bar.addWidget(self.commentary_location_label)
-        
-        # 접기/펼치기 시 표시/숨김을 위한 위젯 목록 저장
-        self.commentary_control_widgets = [
-            self.verse_commentary_radio,
-            self.chapter_commentary_radio,
-            self.commentary_location_label
-        ]
 
-        layout.addLayout(control_bar)
-        
+        layout.addWidget(self.commentary_control_bar)
+
         self.commentary_text_browser = QTextBrowser()
         self.commentary_text_browser.setFont(QFont(self.font_family, self.commentary_font_size))
         self.commentary_text_browser.setOpenExternalLinks(False)
@@ -178,24 +178,29 @@ class CompositeTab(QWidget):
         layout.setContentsMargins(2, 2, 2, 2)
         layout.setSpacing(2)
         
+        # 접기/펼치기 버튼 — 항상 보이는 얇은 상단 줄
+        self.crossref_collapse_btn = QPushButton("▾")
+        self.crossref_collapse_btn.setProperty("collapseButton", "true")
+        self.crossref_collapse_btn.setFixedSize(28, 22)
+        self.crossref_collapse_btn.setToolTip("관주 영역 접기/펼치기")
+        btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(0, 0, 0, 0)
+        btn_row.addWidget(self.crossref_collapse_btn)
+        btn_row.addStretch(1)
+        layout.addLayout(btn_row)
+
         control_bar = QFrame()
         control_bar.setObjectName("subCommandBar")
+        self.crossref_control_bar = control_bar
         control_bar_layout = QHBoxLayout(control_bar)
         control_bar_layout.setContentsMargins(6, 4, 6, 4)
 
-        # 접기/펼치기 버튼 추가
-        self.crossref_collapse_btn = QPushButton("▼")
-        self.crossref_collapse_btn.setFixedSize(24, 24); self.crossref_collapse_btn.setProperty("compact", "true")
-        self.crossref_collapse_btn.setToolTip("관주 영역 접기/펼치기")
-        control_bar_layout.addWidget(self.crossref_collapse_btn)
-        control_bar_layout.addSpacing(5)
-        
         # 관주 제목 라벨 추가
         self.crossref_title_label = QLabel("관주")
         self.crossref_title_label.setStyleSheet("font-weight: bold;")
         control_bar_layout.addWidget(self.crossref_title_label)
         control_bar_layout.addSpacing(10)
-        
+
         self.crossref_translation_combo = QComboBox()
         self.crossref_translation_combo.addItems(self.available_translations)
         self.crossref_translation_combo.setCurrentText(self.crossref_translation)
@@ -221,14 +226,6 @@ class CompositeTab(QWidget):
         self.crossref_current_verse_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         control_bar_layout.addStretch(1)
         control_bar_layout.addWidget(self.crossref_current_verse_label)
-        
-        # 접기/펼치기 시 표시/숨김을 위한 위젯 목록 저장
-        self.crossref_control_widgets = [
-            self.crossref_translation_combo,
-            self.crossref_style_radio1,
-            self.crossref_style_radio2,
-            self.crossref_current_verse_label
-        ]
 
         self.crossref_text_browser = QTextBrowser()
         self.crossref_text_browser.setFont(QFont(self.font_family, self.crossref_font_size))
@@ -563,6 +560,7 @@ class CompositeTab(QWidget):
         if self.commentary_collapsed:
             # 펼치기: 펼쳐진 창의 개수에 따라 동적으로 너비 계산
             self.commentary_collapsed = False
+            self.commentary_widget.setMinimumWidth(self.MIN_EXPANDED_WIDTH)
             total_width = sum(current_sizes)
             
             # 펼쳐진 창의 개수 확인 (성경 본문은 항상 펼쳐져 있음)
@@ -598,16 +596,16 @@ class CompositeTab(QWidget):
                 crossref_width = self.MIN_COLLAPSED_WIDTH
             
             self.splitter.setSizes([bible_width, commentary_width, crossref_width])
-            self.commentary_collapse_btn.setText("▼")
+            self.commentary_collapse_btn.setText("▾")
             # 펼침 상태에서 텍스트 브라우저 및 컨트롤 보이기
             self.commentary_text_browser.setVisible(True)
-            for widget in self.commentary_control_widgets:
-                widget.setVisible(True)
+            self.commentary_control_bar.setVisible(True)
         else:
             # 접기: 현재 크기 저장 후 최소 폭으로 축소
             self.commentary_saved_size = current_sizes[1]
             self.commentary_collapsed = True
-            
+            self.commentary_widget.setMinimumWidth(self.MIN_COLLAPSED_WIDTH)
+
             # 나머지 영역이 공간을 차지하도록 크기 조정
             total_width = sum(current_sizes)
             available_width = total_width - self.MIN_COLLAPSED_WIDTH
@@ -625,11 +623,10 @@ class CompositeTab(QWidget):
                 crossref_width = int(available_width * crossref_ratio)
             
             self.splitter.setSizes([bible_width, self.MIN_COLLAPSED_WIDTH, crossref_width])
-            self.commentary_collapse_btn.setText("▶")
+            self.commentary_collapse_btn.setText("▸")
             # 접힘 상태에서 텍스트 브라우저 및 컨트롤 숨기기
             self.commentary_text_browser.setVisible(False)
-            for widget in self.commentary_control_widgets:
-                widget.setVisible(False)
+            self.commentary_control_bar.setVisible(False)
     
     def toggle_crossref(self):
         """관주 영역 접기/펼치기"""
@@ -638,6 +635,7 @@ class CompositeTab(QWidget):
         if self.crossref_collapsed:
             # 펼치기: 펼쳐진 창의 개수에 따라 동적으로 너비 계산
             self.crossref_collapsed = False
+            self.crossref_widget.setMinimumWidth(self.MIN_EXPANDED_WIDTH)
             total_width = sum(current_sizes)
             
             # 펼쳐진 창의 개수 확인 (성경 본문은 항상 펼쳐져 있음)
@@ -673,16 +671,16 @@ class CompositeTab(QWidget):
                 crossref_width = available_width
             
             self.splitter.setSizes([bible_width, commentary_width, crossref_width])
-            self.crossref_collapse_btn.setText("▼")
+            self.crossref_collapse_btn.setText("▾")
             # 펼침 상태에서 텍스트 브라우저 및 컨트롤 보이기
             self.crossref_text_browser.setVisible(True)
-            for widget in self.crossref_control_widgets:
-                widget.setVisible(True)
+            self.crossref_control_bar.setVisible(True)
         else:
             # 접기: 현재 크기 저장 후 최소 폭으로 축소
             self.crossref_saved_size = current_sizes[2]
             self.crossref_collapsed = True
-            
+            self.crossref_widget.setMinimumWidth(self.MIN_COLLAPSED_WIDTH)
+
             # 나머지 영역이 공간을 차지하도록 크기 조정
             total_width = sum(current_sizes)
             available_width = total_width - self.MIN_COLLAPSED_WIDTH
@@ -700,8 +698,7 @@ class CompositeTab(QWidget):
                 commentary_width = int(available_width * commentary_ratio)
             
             self.splitter.setSizes([bible_width, commentary_width, self.MIN_COLLAPSED_WIDTH])
-            self.crossref_collapse_btn.setText("▶")
+            self.crossref_collapse_btn.setText("▸")
             # 접힘 상태에서 텍스트 브라우저 및 컨트롤 숨기기
             self.crossref_text_browser.setVisible(False)
-            for widget in self.crossref_control_widgets:
-                widget.setVisible(False)
+            self.crossref_control_bar.setVisible(False)

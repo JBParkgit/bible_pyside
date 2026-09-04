@@ -235,6 +235,17 @@ QPushButton[compact="true"] {{
     padding: 0; min-width: 0; min-height: 0;
     font-weight: 600;
 }}
+/* 통합 탭 주석/관주 접기 버튼: 테두리 없는 납작한 아이콘 버튼 */
+QPushButton[collapseButton="true"] {{
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 0; min-width: 0; min-height: 0;
+    color: {t['text_secondary']};
+    font-size: 11px;
+}}
+QPushButton[collapseButton="true"]:hover {{ background-color: {t['fill_hover']}; }}
+QPushButton[collapseButton="true"]:pressed {{ background-color: {t['fill_pressed']}; }}
 
 /* ---------- 입력 ---------- */
 QLineEdit, QComboBox, QPlainTextEdit, QSpinBox {{
@@ -317,14 +328,19 @@ QFrame#selectionBar QPushButton {{
     border: 1px solid transparent;
     background-color: transparent;
     border-radius: 6px;
-    padding: 4px 10px;
+    padding: 2px 8px;
+    min-height: 0;
+    margin: 0;
 }}
 QFrame#selectionBar QPushButton:hover {{ background-color: {t['fill_hover']}; }}
 QFrame#selectionBar QPushButton[primary="true"] {{
     background-color: {t['accent']}; color: {t['on_accent']}; border-color: {t['accent']};
 }}
 QFrame#selectionBar QPushButton[primary="true"]:hover {{ background-color: {t['accent_hover']}; }}
-QLabel#selectionReferenceLabel {{ font-weight: 600; color: {t['text']}; }}
+QLabel#selectionReferenceLabel {{ font-weight: 600; color: {t['text']}; padding: 0 2px; }}
+QScrollArea#selectionScroll, QScrollArea#selectionScroll > QWidget > QWidget {{ background: transparent; }}
+QScrollArea#selectionScroll QScrollBar:horizontal {{ height: 8px; }}
+QScrollArea#selectionScroll QScrollBar::handle:horizontal {{ min-width: 24px; }}
 
 /* ---------- 팝업 프레임 ---------- */
 QFrame#mainFrame {{
