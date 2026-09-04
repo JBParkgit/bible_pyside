@@ -7,7 +7,7 @@
     "num_views": 2,
     "view_translations": [
         "개역개정",
-        "中文和合本"
+        "위구르어_아랍문자"
     ],
     "commentary_font_size": 13,
     "crossref_display_font_size": 13,
@@ -21,7 +21,6 @@
     "theme": "Light",
     "comparison_font_size": 13,
     "default_start_tab": 1,
-    "gemini_api_key": "",
     "gemini_model": "gemini-3.6-flash",
     "gemini_prompt": ""
 }

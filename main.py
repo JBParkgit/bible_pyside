@@ -38,7 +38,7 @@ from bible_database import BibleDatabase
 from original_language_data import OriginalLanguageDataLoader
 from original_language_tab import OriginalLanguageTab
 from ai_explain import (
-    GeminiClient, AiExplanationDialog, AiSettingsDialog, AiLogDialog,
+    GeminiClient, AiExplanationDialog, AiSettingsDialog,
     build_prompt, build_question_prompt, DEFAULT_MODEL, LEGACY_DEFAULT_MODELS,
 )
 
@@ -408,7 +408,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("물댄동산 성경 V.5811.9.4")
+        self.setWindowTitle("물댄동산 성경 V.5811.10")
         self.setWindowIcon(QIcon('book.ico'))
         self.setGeometry(100, 100, 1200, 800)
         self._settings = self.load_settings()
@@ -465,7 +465,6 @@ class MainWindow(QMainWindow):
         self.gemini_client.retrying.connect(self._on_ai_explanation_retrying)
         self.gemini_client.log_line.connect(self._append_ai_log)
         self.ai_dialog = None
-        self.ai_log_dialog = None
         self._last_ai_request = None
 
         self.init_ui()
@@ -1039,13 +1038,14 @@ class MainWindow(QMainWindow):
             self._settings.get('gemini_prompt', ''),
             self,
         )
-        dialog.log_requested.connect(self._show_ai_log)
         if dialog.exec():
             key, model, prompt = dialog.values()
             self._settings['gemini_api_key'] = key
             self._settings['gemini_model'] = model or DEFAULT_MODEL
             self._settings['gemini_prompt'] = prompt
             self.save_settings()
+            if self.ai_dialog is not None:
+                self.ai_dialog.set_prompt(self._settings.get('gemini_prompt', ''))
 
     @Slot(str, str, str, str, int, int, int)
     def request_ai_explanation_for_selection(self, reference, passage, translation,
@@ -1068,16 +1068,20 @@ class MainWindow(QMainWindow):
         }
         if self.ai_dialog is None:
             self.ai_dialog = AiExplanationDialog(
-                self, self.font_family, self._settings.get('bible_font_size', 13)
+                self, self.font_family, self._settings.get('bible_font_size', 13),
+                self._settings.get('gemini_prompt', ''),
             )
             self.ai_dialog.regenerate_requested.connect(self._regenerate_ai_explanation)
             self.ai_dialog.default_requested.connect(self._run_default_ai_explanation)
             self.ai_dialog.question_submitted.connect(self._ask_ai_question)
             self.ai_dialog.save_requested.connect(self._save_ai_note)
             self.ai_dialog.delete_requested.connect(self._delete_ai_note)
-            self.ai_dialog.log_requested.connect(self._show_ai_log)
+            self.ai_dialog.prompt_saved.connect(self._save_ai_prompt)
             # 창을 닫으면 진행 중인 요청도 취소한다
             self.ai_dialog.close_button.clicked.connect(self.gemini_client.cancel)
+
+        # 하단 로그 영역에 기존 통신 기록을 채워 넣는다(이후는 실시간 추가).
+        self.ai_dialog.set_log_entries(self.gemini_client.log_entries)
 
         # 저장된 해설이 있으면 바로 보여주고, 없으면 '기본 설명/질문' 선택 화면을 연다.
         saved = None
@@ -1197,18 +1201,14 @@ class MainWindow(QMainWindow):
 
     @Slot(str)
     def _append_ai_log(self, line):
-        if self.ai_log_dialog is not None:
-            self.ai_log_dialog.append(line)
+        if self.ai_dialog is not None:
+            self.ai_dialog.append_log_line(line)
 
-    @Slot()
-    def _show_ai_log(self):
-        if self.ai_log_dialog is None:
-            self.ai_log_dialog = AiLogDialog(self)
-            self.ai_log_dialog.clear_requested.connect(self.gemini_client.clear_log)
-        self.ai_log_dialog.set_entries(self.gemini_client.log_entries)
-        self.ai_log_dialog.show()
-        self.ai_log_dialog.raise_()
-        self.ai_log_dialog.activateWindow()
+    @Slot(str)
+    def _save_ai_prompt(self, text):
+        """AI 창 하단에서 편집한 기본 프롬프트를 저장한다."""
+        self._settings['gemini_prompt'] = text
+        self.save_settings()
 
     def apply_global_font(self):
         for i in range(self.tab_widget.count()):

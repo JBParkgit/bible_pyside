@@ -21,7 +21,8 @@ from PySide6.QtNetwork import QNetworkAccessManager, QNetworkRequest, QNetworkRe
 
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QHBoxLayout,
-    QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton, QTextBrowser, QVBoxLayout,
+    QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton, QTabWidget,
+    QTextBrowser, QVBoxLayout, QWidget,
 )
 
 
@@ -38,8 +39,8 @@ DEFAULT_MODEL = "gemini-3.6-flash"
 # (사용자가 명시적으로 다른 값을 넣으면 그대로 사용된다.)
 LEGACY_DEFAULT_MODELS = {"gemini-2.5-flash", "gemini-1.5-flash"}
 
-# 프롬프트는 설정에서 편집 가능하다. {reference} {passage} {translation} 자리표시자 사용.
-DEFAULT_PROMPT_TEMPLATE = """당신은 전통적인 복음주의(evangelical) 관점에 서 있는 개신교 성경 교사입니다. 성경의 영감과 무오성, 최종 권위를 인정하고, 역사적·문법적(historical-grammatical) 해석 원리를 따르며, 성경 전체를 그리스도 중심으로 읽습니다.
+# 프롬프트는 설정·AI 창에서 편집 가능하다. {reference} {passage} {translation} 자리표시자 사용.
+DEFAULT_PROMPT_TEMPLATE = """당신은 전통적인 복음주의(evangelical) 관점에 서 있는, 신학교(seminary) 교수 수준의 개신교 성경 해석 전문가입니다. 성경 원어(히브리어·아람어·헬라어), 성경신학과 조직신학, 고대 근동 및 제2성전기 배경, 본문비평과 주해사(history of interpretation)에 정통합니다. 성경의 영감과 무오성, 최종 권위를 인정하고, 역사적·문법적(historical-grammatical) 해석 원리를 따르며, 성경 전체를 그리스도 중심으로 읽습니다.
 
 아래 본문을 한국어로 해설해 주세요.
 
@@ -78,7 +79,8 @@ def build_question_prompt(reference, passage, translation, question):
     """선택 구절에 대한 사용자의 자유 질문용 프롬프트."""
     version = f" · {translation}" if translation else ""
     return (
-        "당신은 성경을 알기 쉽게 설명하는 개신교 성경 교사입니다. "
+        "당신은 신학교(seminary) 교수 수준의 개신교 성경 해석 전문가입니다. "
+        "원어와 성경신학·조직신학, 고대 근동 배경, 주해사에 정통합니다. "
         "아래 성경 본문에 관한 질문에 한국어로 답해 주세요. 본문과 성경 전체의 "
         "문맥에 근거해 설명하고, 본문에 없는 사실이나 존재하지 않는 성경 구절을 "
         "지어내지 마세요. 불확실하면 그렇다고 쓰세요.\n\n"
@@ -335,52 +337,6 @@ class GeminiClient(QObject):
         return "".join(part.get("text", "") for part in parts).strip()
 
 
-class AiLogDialog(QDialog):
-    """Gemini API 통신 로그 뷰어 (비모달)."""
-
-    clear_requested = Signal()
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("AI 통신 로그")
-        self.resize(680, 460)
-        self.setModal(False)
-        layout = QVBoxLayout(self)
-
-        self.view = QPlainTextEdit()
-        self.view.setReadOnly(True)
-        self.view.setFont(QFont("Consolas", 10))
-        self.view.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        layout.addWidget(self.view, 1)
-
-        row = QHBoxLayout()
-        row.addStretch(1)
-        self.clear_button = QPushButton("지우기")
-        self.copy_button = QPushButton("전체 복사")
-        self.close_button = QPushButton("닫기")
-        for b in (self.clear_button, self.copy_button, self.close_button):
-            row.addWidget(b)
-        layout.addLayout(row)
-
-        self.clear_button.clicked.connect(self._clear)
-        self.copy_button.clicked.connect(
-            lambda: QApplication.clipboard().setText(self.view.toPlainText())
-        )
-        self.close_button.clicked.connect(self.close)
-
-    def set_entries(self, entries):
-        self.view.setPlainText("\n".join(entries))
-        self.view.moveCursor(self.view.textCursor().MoveOperation.End)
-
-    def append(self, line):
-        self.view.appendPlainText(line)
-        self.view.moveCursor(self.view.textCursor().MoveOperation.End)
-
-    def _clear(self):
-        self.view.clear()
-        self.clear_requested.emit()
-
-
 class AiExplanationDialog(QDialog):
     """AI 설명 결과를 보여주는 비모달 창. 같은 창을 재사용한다."""
 
@@ -389,12 +345,14 @@ class AiExplanationDialog(QDialog):
     question_submitted = Signal(str)   # 선택 구절에 대한 사용자의 자유 질문
     save_requested = Signal()          # 현재 해설을 해당 구절에 저장(DB)
     delete_requested = Signal()        # 이 구절에 저장된 해설 삭제
-    log_requested = Signal()           # 통신 로그 창 열기
+    prompt_saved = Signal(str)         # 편집한 기본 프롬프트 저장
 
-    def __init__(self, parent=None, font_family="Malgun Gothic", font_size=13):
+    _PANEL_HEIGHT = 200
+
+    def __init__(self, parent=None, font_family="Malgun Gothic", font_size=13, prompt=""):
         super().__init__(parent)
         self.setWindowTitle("AI 구절 설명")
-        self.resize(560, 660)
+        self.resize(600, 720)
         self.setModal(False)
         self._raw_text = ""
 
@@ -428,8 +386,10 @@ class AiExplanationDialog(QDialog):
         self.status_label.setStyleSheet("color: palette(mid);")
         button_row.addWidget(self.status_label)
         button_row.addStretch(1)
-        self.log_button = QPushButton("로그")
-        self.log_button.setToolTip("Gemini API 통신 로그 보기")
+        self.panel_toggle_button = QPushButton("로그·프롬프트 ▾")
+        self.panel_toggle_button.setCheckable(True)
+        self.panel_toggle_button.setChecked(True)
+        self.panel_toggle_button.setToolTip("하단의 통신 로그 / 기본 프롬프트 영역을 접거나 폅니다")
         self.regenerate_button = QPushButton("다시 생성")
         self.copy_button = QPushButton("복사")
         self.save_button = QPushButton("구절에 저장")
@@ -439,12 +399,54 @@ class AiExplanationDialog(QDialog):
         self.delete_button.setVisible(False)
         self.export_button = QPushButton("파일로…")
         self.close_button = QPushButton("닫기")
-        for button in (self.log_button, self.regenerate_button, self.copy_button,
+        for button in (self.panel_toggle_button, self.regenerate_button, self.copy_button,
                        self.save_button, self.delete_button, self.export_button, self.close_button):
             button_row.addWidget(button)
         layout.addLayout(button_row)
 
-        self.log_button.clicked.connect(self.log_requested.emit)
+        # ── 하단 영역: 통신 로그 / 기본 프롬프트 (별도 창 대신 여기서 실시간 표시) ──
+        self.bottom_panel = QTabWidget()
+        self.bottom_panel.setFixedHeight(self._PANEL_HEIGHT)
+
+        log_tab = QWidget()
+        log_layout = QVBoxLayout(log_tab)
+        log_layout.setContentsMargins(4, 4, 4, 4)
+        self.log_view = QPlainTextEdit()
+        self.log_view.setReadOnly(True)
+        self.log_view.setFont(QFont("Consolas", 9))
+        self.log_view.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        log_layout.addWidget(self.log_view, 1)
+        log_btns = QHBoxLayout()
+        log_btns.addStretch(1)
+        self.log_clear_button = QPushButton("지우기")
+        self.log_copy_button = QPushButton("복사")
+        log_btns.addWidget(self.log_clear_button)
+        log_btns.addWidget(self.log_copy_button)
+        log_layout.addLayout(log_btns)
+        self.bottom_panel.addTab(log_tab, "통신 로그")
+
+        prompt_tab = QWidget()
+        prompt_layout = QVBoxLayout(prompt_tab)
+        prompt_layout.setContentsMargins(4, 4, 4, 4)
+        prompt_layout.addWidget(QLabel(
+            "‘기본 설명’에 쓰이는 프롬프트입니다. 자리표시자: {reference} {passage} {translation}"
+        ))
+        self.prompt_edit = QPlainTextEdit(prompt.strip() if prompt and prompt.strip() else DEFAULT_PROMPT_TEMPLATE)
+        self.prompt_edit.setTabChangesFocus(True)
+        prompt_layout.addWidget(self.prompt_edit, 1)
+        prompt_btns = QHBoxLayout()
+        prompt_btns.addStretch(1)
+        self.prompt_reset_button = QPushButton("기본값으로")
+        self.prompt_save_button = QPushButton("프롬프트 저장")
+        self.prompt_save_button.setProperty("primary", "true")
+        prompt_btns.addWidget(self.prompt_reset_button)
+        prompt_btns.addWidget(self.prompt_save_button)
+        prompt_layout.addLayout(prompt_btns)
+        self.bottom_panel.addTab(prompt_tab, "기본 프롬프트")
+
+        layout.addWidget(self.bottom_panel)
+
+        self.panel_toggle_button.toggled.connect(self._toggle_panel)
         self.regenerate_button.clicked.connect(self.regenerate_requested.emit)
         self.explain_button.clicked.connect(self.default_requested.emit)
         self.copy_button.clicked.connect(self._copy_text)
@@ -454,6 +456,44 @@ class AiExplanationDialog(QDialog):
         self.close_button.clicked.connect(self.close)
         self.ask_button.clicked.connect(self._submit_question)
         self.question_edit.returnPressed.connect(self._submit_question)
+        self.log_clear_button.clicked.connect(self.log_view.clear)
+        self.log_copy_button.clicked.connect(
+            lambda: QApplication.clipboard().setText(self.log_view.toPlainText())
+        )
+        self.prompt_reset_button.clicked.connect(
+            lambda: self.prompt_edit.setPlainText(DEFAULT_PROMPT_TEMPLATE)
+        )
+        self.prompt_save_button.clicked.connect(self._save_prompt)
+
+    def _toggle_panel(self, shown):
+        self.bottom_panel.setVisible(shown)
+        self.panel_toggle_button.setText(
+            "로그·프롬프트 ▾" if shown else "로그·프롬프트 ▸"
+        )
+        delta = self._PANEL_HEIGHT + 8
+        self.resize(self.width(), self.height() + (delta if shown else -delta))
+
+    def _save_prompt(self):
+        text = self.prompt_edit.toPlainText().strip()
+        self.prompt_saved.emit(text)
+        self.bottom_panel.setTabText(1, "기본 프롬프트 ✓")
+        QTimer.singleShot(2000, lambda: self.bottom_panel.setTabText(1, "기본 프롬프트"))
+
+    def set_prompt(self, text):
+        self.prompt_edit.setPlainText(
+            text.strip() if text and text.strip() else DEFAULT_PROMPT_TEMPLATE
+        )
+
+    def set_log_entries(self, entries):
+        self.log_view.setPlainText("\n".join(entries))
+        self.log_view.moveCursor(self.log_view.textCursor().MoveOperation.End)
+
+    def append_log_line(self, line):
+        bar = self.log_view.verticalScrollBar()
+        at_bottom = bar.value() >= bar.maximum() - 4
+        self.log_view.appendPlainText(line)
+        if at_bottom:
+            self.log_view.moveCursor(self.log_view.textCursor().MoveOperation.End)
 
     def _submit_question(self):
         text = self.question_edit.text().strip()
@@ -572,8 +612,6 @@ class AiExplanationDialog(QDialog):
 class AiSettingsDialog(QDialog):
     """Gemini API 키 / 모델 / 프롬프트 편집."""
 
-    log_requested = Signal()
-
     def __init__(self, api_key="", model=DEFAULT_MODEL, prompt="", parent=None):
         super().__init__(parent)
         self.setWindowTitle("AI 설명 설정 (Gemini)")
@@ -605,12 +643,8 @@ class AiSettingsDialog(QDialog):
 
         open_button = QPushButton("발급 페이지 열기")
         open_button.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(API_KEY_URL)))
-        log_button = QPushButton("통신 로그 보기")
-        log_button.setToolTip("Gemini API 와 실시간으로 어떻게 통신하는지 로그로 확인합니다.")
-        log_button.clicked.connect(self.log_requested.emit)
         open_row = QHBoxLayout()
         open_row.addWidget(open_button)
-        open_row.addWidget(log_button)
         open_row.addStretch(1)
         layout.addLayout(open_row)
 

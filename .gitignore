@@ -10,10 +10,11 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 
-# PyInstaller large build artifacts
+# PyInstaller build artifacts
+build/
 dist/*.zip
 dist/waterdbible.zip
-build/**/*.zip
+*.spec.bak
 *.dll.bak
 
 # OS / editor
