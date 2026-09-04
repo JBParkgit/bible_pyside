@@ -441,8 +441,11 @@ class SharedBibleView(QWidget):
         self.highlight_changed.emit()
 
     def set_font_family(self, font_name):
+        if self.font_family == font_name:
+            return
         self.font_family = font_name
         self.text_browser.setFont(QFont(self.font_family, self.font_size))
+        self.update_content(preserve_scroll=True, realign_verse=False)
 
     @Slot(int)
     def set_font_size(self, size):

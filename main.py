@@ -45,7 +45,10 @@ from ai_explain import (
 
 import qdarktheme
 
-from ui_theme import TOKENS, office_qss, resolve_mode, themed_icon
+from ui_theme import (
+    TOKENS, office_qss, resolve_mode, themed_icon,
+    FONT_FAMILY_PRIMARY, FONT_POINT_SIZE,
+)
 from body_style import body_style_from_settings, body_style_to_settings
 from body_style_dialog import BodyStyleDialog
 
@@ -1242,6 +1245,9 @@ class MainWindow(QMainWindow):
             },
             additional_qss=office_qss(mode),
         )
+
+        # 앱 기본(크롬) 글꼴. 본문/결과 영역은 각 위젯이 setFont() 로 사용자 글꼴을 덮어쓴다.
+        QApplication.setFont(QFont(FONT_FAMILY_PRIMARY, FONT_POINT_SIZE))
 
         palette = QApplication.palette()
         palette.setColor(QPalette.ColorRole.Base, QColor(t["surface"]))

@@ -97,10 +97,9 @@ def themed_icon(name, color):
 
 def office_qss(mode):
     t = TOKENS[mode]
+    # 글꼴은 QApplication.setFont() 로 지정한다. QSS 에 font-family 를 두면
+    # 본문/결과 영역(QTextBrowser 등)이 setFont() 로 고른 사용자 글꼴을 무시한다.
     return f"""
-* {{
-    font-family: {FONT_STACK};
-}}
 QWidget {{ color: {t['text']}; }}
 QMainWindow, QDialog {{ background-color: {t['window']}; }}
 
