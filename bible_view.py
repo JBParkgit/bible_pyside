@@ -568,6 +568,9 @@ class SharedBibleView(QWidget):
         line_height = bstyle.get("line_height", 1.6)
         verse_spacing = bstyle.get("verse_spacing", 6)
         num_scale = bstyle.get("num_scale", 85)
+        # Qt 리치텍스트는 중첩 <span> 의 백분율 font-size 를 반영하지 않으므로
+        # 본문 글자 크기 기준의 절대 pt 값으로 환산해서 적용한다.
+        num_pt = max(6, round(self.font_size * num_scale / 100.0, 1))
         num_muted = bstyle.get("num_muted", True)
         subtitle_align = bstyle.get("subtitle_align", "left")
         subtitle_accent = bstyle.get("subtitle_accent", True)
@@ -613,14 +616,14 @@ class SharedBibleView(QWidget):
 
             safe_book_abbr = html_escape(book_abbr)
             num_color = getattr(self, "_verse_num_color", text_color_name) if num_muted else text_color_name
-            num_style = f"color: {num_color}; font-weight: normal; font-size: {num_scale}%;"
+            num_style = f"color: {num_color}; font-weight: normal; font-size: {num_pt}pt;"
             if self.verse_display_mode == 0:
                 verse_prefix = f"<span style='{num_style}'>({safe_book_abbr} {self.current_chapter}:{num_label})</span>"
             elif self.verse_display_mode == 1:
                 verse_prefix = f"<span style='{num_style}'>{safe_book_abbr} {self.current_chapter}:{num_label}</span>"
             else:
                 # 절 번호만: 점 없이, 본문과 구분되도록 강조색으로 표시
-                marker_style = f"color: {accent_color}; font-weight: bold; font-size: {num_scale}%;"
+                marker_style = f"color: {accent_color}; font-weight: bold; font-size: {num_pt}pt;"
                 verse_prefix = f"<span style='{marker_style}'>{num_label}</span>"
 
             # 저장된 AI 해설이 있는 구절에 작은 표시(클릭 시 그 해설을 다시 연다)

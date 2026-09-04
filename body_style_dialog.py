@@ -26,14 +26,15 @@ SAMPLE_VERSES = [
 ]
 
 
-def render_body_html(style, verses, colors, font_family):
+def render_body_html(style, verses, colors, font_family, base_font_size=14):
     """body_style + 표본 구절 -> 미리보기 HTML (bible_view.update_content 규칙 축약)."""
     text_c = colors["text"]
     num_c = colors["muted"] if style["num_muted"] else text_c
     sub_c = colors["accent"] if style["subtitle_accent"] else text_c
     lh = style["line_height"]
     vs = style["verse_spacing"]
-    num_pct = style["num_scale"]
+    # Qt 리치텍스트는 중첩 <span> 의 백분율 font-size 를 반영하지 않으므로 pt 로 환산
+    num_pt = max(6, round(base_font_size * style["num_scale"] / 100.0, 1))
     sub_align = style["subtitle_align"]
     fam = html_escape(font_family)
 
@@ -56,7 +57,7 @@ def render_body_html(style, verses, colors, font_family):
             f'style="border-collapse:collapse; margin-bottom:{vs}px;">'
             f'<tr>'
             f'<td width="1" style="white-space:nowrap; padding-right:6px; vertical-align:top;">'
-            f"<span style='color:{num_c}; font-size:{num_pct}%;'>{num}.</span></td>"
+            f"<span style='color:{num_c}; font-size:{num_pt}pt;'>{num}.</span></td>"
             f'<td style="vertical-align:top; line-height:{lh};">'
             f"<span style='color:{text_c};'>{html_escape(item['text'])}</span></td>"
             f"</tr></table>"
@@ -223,7 +224,9 @@ class BodyStyleDialog(QDialog):
         family = self.font_combo.currentFont().family()
         self.preview.setFont(QFont(family, self.bible_size_spin.value()))
         self.preview.document().setDocumentMargin(style["doc_margin"])
-        self.preview.setHtml(render_body_html(style, self._sample, self._colors, family))
+        self.preview.setHtml(render_body_html(
+            style, self._sample, self._colors, family, self.bible_size_spin.value()
+        ))
 
     def _on_reset(self):
         self._set_body_controls(dict(DEFAULT_BODY_STYLE))
