@@ -43,23 +43,23 @@ class CustomTextBrowser(QTextBrowser):
             current_line = lines[i]
             
             m1 = re.match(r'^\(?\s*[가-힣A-Za-z]+\s*\d+:(\d+)\s*\)?', current_line)
-            m2 = re.match(r'^\s*(\d+)\.', current_line)
+            m2 = re.match(r'^\s*(\d+)(?:-\d+)?\.?\s*$', current_line)
             is_only_a_ref = (m1 or m2) and len(current_line) < 35
 
             if is_only_a_ref and i + 1 < len(lines):
                 next_line = lines[i+1]
                 nm1 = re.match(r'^\(?\s*[가-힣A-Za-z]+\s*\d+:(\d+)\s*\)?', next_line)
-                nm2 = re.match(r'^\s*(\d+)\.', next_line)
-                
+                nm2 = re.match(r'^\s*(\d+)(?:-\d+)?\.?\s*$', next_line)
+
                 if not (nm1 or nm2):
                     merged_line = current_line + " " + next_line
                     final_lines.append(merged_line)
                     i += 2
                     continue
-            
+
             final_lines.append(current_line)
             i += 1
-        
+
         final_processed_lines = [re.sub(r'\s+', ' ', line) for line in final_lines]
         processed_text = '\n'.join(final_processed_lines)
 
@@ -735,13 +735,13 @@ class SharedBibleView(QWidget):
         while i < len(lines):
             current_line = lines[i]
             m1 = re.match(r'^\(?\s*[가-힣A-Za-z]+\s*\d+:(\d+)\s*\)?', current_line)
-            m2 = re.match(r'^\s*(\d+)\.', current_line)
+            m2 = re.match(r'^\s*(\d+)(?:-\d+)?\.?\s*$', current_line)
             is_only_a_ref = (m1 or m2) and len(current_line) < 35
 
             if is_only_a_ref and i + 1 < len(lines):
                 next_line = lines[i+1]
                 nm1 = re.match(r'^\(?\s*[가-힣A-Za-z]+\s*\d+:(\d+)\s*\)?', next_line)
-                nm2 = re.match(r'^\s*(\d+)\.', next_line)
+                nm2 = re.match(r'^\s*(\d+)(?:-\d+)?\.?\s*$', next_line)
                 if not (nm1 or nm2):
                     merged_line = current_line + " " + next_line
                     final_lines.append(merged_line)
@@ -749,14 +749,14 @@ class SharedBibleView(QWidget):
                     continue
             final_lines.append(current_line)
             i += 1
-        
+
         final_processed_lines = [re.sub(r'\s+', ' ', line) for line in final_lines]
         text_to_send = '\n'.join(final_processed_lines)
 
         def get_verse_num_from_line(line_text):
             m1 = re.match(r'^\(?\s*[가-힣A-Za-z]+\s*\d+:(\d+)\s*\)?', line_text)
             if m1: return m1.group(1)
-            m2 = re.match(r'^\s*(\d+)\.', line_text)
+            m2 = re.match(r'^\s*(\d+)(?:-\d+)?\.?\s+', line_text)
             if m2: return m2.group(1)
             return None
 
@@ -839,8 +839,8 @@ class SharedBibleView(QWidget):
                 match2 = re.search(r'[가-힣A-Za-z]+\s*\d+:(\d+)|^\s*(\d+):(\d+)', line_text)
                 if match2:
                     return int(match2.group(1) or match2.group(3))
-                # 패턴 3: 1. (절 번호만)
-                match3 = re.match(r'^\s*(\d+)\.', line_text)
+                # 패턴 3: 1. 또는 1 (절 번호만)
+                match3 = re.match(r'^\s*(\d+)(?:-\d+)?\.?\s*$', line_text)
                 if match3:
                     return int(match3.group(1))
                 return None

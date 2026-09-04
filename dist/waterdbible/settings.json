@@ -3,7 +3,7 @@
     "chapter": 1,
     "font_family": "맑은 고딕",
     "bible_font_size": 13,
-    "verse_display_mode": 1,
+    "verse_display_mode": 2,
     "num_views": 2,
     "view_translations": [
         "개역개정",
@@ -22,5 +22,12 @@
     "comparison_font_size": 13,
     "default_start_tab": 1,
     "gemini_model": "gemini-3.6-flash",
-    "gemini_prompt": ""
+    "gemini_prompt": "",
+    "body_line_height": 1.6,
+    "body_verse_spacing": 6,
+    "body_num_scale": 85,
+    "body_num_muted": true,
+    "body_subtitle_align": "left",
+    "body_subtitle_accent": true,
+    "body_doc_margin": 18
 }
