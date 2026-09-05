@@ -1058,6 +1058,13 @@ class SharedBibleView(QWidget):
                 except Exception as e:
                     print(f"소제목 확인 중 오류 발생: {e}")
 
+        if self.verse_display_mode == 2:
+            # "1." 스타일은 절 번호만 있는 문단이라 부분 문자열 검색(find)이
+            # 본문 속 숫자와 혼동될 수 있다. 문단 전체가 절 번호(또는 병합 범위)와
+            # 정확히 일치하는 블록을 찾아 그리로 스크롤한다.
+            self._scroll_to_verse_number_block(verse_num)
+            return
+
         book_abbr = self.data_loader.get_book_abbr(
             self.current_book, translation_name=self.translation_combo.currentText())
 
@@ -1066,9 +1073,7 @@ class SharedBibleView(QWidget):
             prefix_to_find = f"({book_abbr} {self.current_chapter}:{verse_num})"
         elif self.verse_display_mode == 1:
             prefix_to_find = f"{book_abbr} {self.current_chapter}:{verse_num}"
-        elif self.verse_display_mode == 2:
-            prefix_to_find = f"{verse_num}."
-        
+
         if not prefix_to_find:
             return
 
@@ -1084,3 +1089,34 @@ class SharedBibleView(QWidget):
             self.text_browser.setTextCursor(cursor)
         else:
             print(f"경고: 스크롤할 구절의 접두사 '{prefix_to_find}'를 찾지 못했습니다.")
+
+    def _scroll_to_verse_number_block(self, verse_num):
+        """'1.' 표시 모드 전용: 절 번호(또는 '5-7' 같은 병합 범위)만 있는
+        문단을 블록 단위로 찾아 스크롤한다."""
+        doc = self.text_browser.document()
+        block = doc.begin()
+        num_re = re.compile(r'^(\d+)(?:-(\d+))?\.?$')
+        target_block = None
+        while block.isValid():
+            m = num_re.match(block.text().strip())
+            if m:
+                start_v = int(m.group(1))
+                end_v = int(m.group(2)) if m.group(2) else start_v
+                if start_v <= verse_num <= end_v:
+                    target_block = block
+                    break
+            block = block.next()
+
+        if target_block is None:
+            print(f"경고: 스크롤할 구절 번호 '{verse_num}'을(를) 찾지 못했습니다.")
+            return
+
+        cursor = QTextCursor(target_block)
+        self.text_browser.setTextCursor(cursor)
+        self.text_browser.ensureCursorVisible()
+        cursor_rect = self.text_browser.cursorRect()
+        scrollbar = self.text_browser.verticalScrollBar()
+        scrollbar.setValue(scrollbar.value() + cursor_rect.top())
+        # 선택/커서 음영이 남지 않도록 커서만 위치시키고 선택은 없앤다.
+        cursor.clearSelection()
+        self.text_browser.setTextCursor(cursor)
