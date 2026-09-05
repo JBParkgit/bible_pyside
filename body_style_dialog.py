@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QFont
 
 from body_style import DEFAULT_BODY_STYLE, body_style_from_settings
+from html_utils import PlainCopyTextBrowser
 from html_utils import html_escape
 
 
@@ -167,7 +168,7 @@ class BodyStyleDialog(QDialog):
         # ---- 미리보기 ----
         right = QVBoxLayout()
         right.addWidget(QLabel("미리보기"))
-        self.preview = QTextBrowser()
+        self.preview = PlainCopyTextBrowser()
         self.preview.setOpenExternalLinks(False)
         right.addWidget(self.preview, 1)
 

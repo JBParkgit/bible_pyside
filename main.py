@@ -1826,8 +1826,12 @@ class MainWindow(QMainWindow):
         if hasattr(new_tab, 'toolbar'):
             new_tab.toolbar.setStyleSheet(self.current_toolbar_stylesheet)
 
-        memo_tab_index = self.tab_widget.indexOf(self.memo_tab)
-        insert_index = memo_tab_index + len(self.additional_read_tabs)
+        # 추가 읽기 탭은 고정 탭(통합~원어) 뒤, 즉 '원어' 탭 다음에 순서대로 쌓인다.
+        # (예전엔 '메모' 다음에 끼워 넣어서 '원어' 탭보다 앞에 생기고, 첫 탭이 마침
+        # update_default_tab_indicator() 의 고정 탭 인덱스(0~6)와 겹쳐 라벨이
+        # "원어"로 덮어써지는 문제가 있었다.)
+        original_language_index = self.tab_widget.indexOf(self.original_language_tab)
+        insert_index = original_language_index + len(self.additional_read_tabs)
         
         actual_index = self.tab_widget.insertTab(insert_index, new_tab, "읽는 중...")
         

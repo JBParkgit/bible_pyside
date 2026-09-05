@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt, Signal, Slot, QUrl, QTimer, QPoint
 from PySide6.QtGui import QFont, QTextOption, QPalette
 
 from bible_view import SharedBibleView
+from html_utils import PlainCopyTextBrowser
 
 class CommentaryTab(QWidget):
     settings_changed = Signal()
@@ -92,7 +93,7 @@ class CommentaryTab(QWidget):
 
         commentary_layout.addLayout(control_bar)
         
-        self.commentary_text_browser = QTextBrowser()
+        self.commentary_text_browser = PlainCopyTextBrowser()
         self.commentary_text_browser.setFont(QFont(self.font_family, self.font_size))
         self.commentary_text_browser.setOpenExternalLinks(False)
         self.commentary_text_browser.setWordWrapMode(QTextOption.WrapAnywhere)

@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Slot, Signal
 from PySide6.QtGui import QFont
 
-from html_utils import get_direction_style, html_escape
+from html_utils import get_direction_style, html_escape, PlainCopyTextBrowser
 
 class ComparisonDialog(QDialog):
     """
@@ -99,7 +99,7 @@ class ComparisonDialog(QDialog):
         
         main_layout.addWidget(self.nav_bar)
 
-        self.text_browser = QTextBrowser()
+        self.text_browser = PlainCopyTextBrowser()
         self.apply_font_settings() # 폰트 설정 적용
         
         main_layout.addWidget(self.text_browser, 1)

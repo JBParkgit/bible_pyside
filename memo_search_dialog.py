@@ -5,6 +5,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 
+from html_utils import PlainCopyTextEdit
+
 class MemoSearchDialog(QDialog):
     verse_selected = Signal(str, int, int)
     
@@ -42,7 +44,7 @@ class MemoSearchDialog(QDialog):
         splitter.addWidget(self.list_widget)
         
         # 메모 내용 보기
-        content_widget = QTextEdit()
+        content_widget = PlainCopyTextEdit()
         content_widget.setReadOnly(True)
         self.content_view = content_widget
         splitter.addWidget(content_widget)

@@ -9,8 +9,9 @@ from PySide6.QtCore import Qt, Signal, Slot, QTimer, QPoint
 from PySide6.QtGui import QFont, QAction
 
 from bible_view import SharedBibleView
+from html_utils import _PlainCopyMixin
 
-class MemoEditor(QTextEdit):
+class MemoEditor(_PlainCopyMixin, QTextEdit):
     def insertFromMimeData(self, source):
         # 붙여넣기 시 서식 없는 텍스트만 입력
         if source.hasText():

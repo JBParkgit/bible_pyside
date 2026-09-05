@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt, Signal, Slot, QUrl, QTimer, QPoint
 from PySide6.QtGui import QFont, QTextOption, QPalette
 
 from bible_view import SharedBibleView
+from html_utils import PlainCopyTextBrowser
 
 class CrossRefTab(QWidget):
     settings_changed = Signal()
@@ -130,7 +131,7 @@ class CrossRefTab(QWidget):
         control_bar_layout.addStretch(1) # 우측 정렬을 위해 stretch 추가
         control_bar_layout.addWidget(self.crossref_current_verse_label)
 
-        self.crossref_text_browser = QTextBrowser()
+        self.crossref_text_browser = PlainCopyTextBrowser()
         self.crossref_text_browser.setFont(QFont(self.font_family, self.crossref_font_size))
         self.crossref_text_browser.setReadOnly(True)
         self.crossref_text_browser.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)

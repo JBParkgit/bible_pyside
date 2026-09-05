@@ -7,6 +7,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, Slot, QTimer, QPoint
 from PySide6.QtGui import QFont, QTextOption, QPalette, QKeySequence, QShortcut
 
+from html_utils import PlainCopyTextBrowser
+
 class SearchTab(QWidget):
     settings_changed = Signal()
     request_commentary = Signal(str, int, int)
@@ -62,7 +64,7 @@ class SearchTab(QWidget):
         top_bar_layout.addWidget(QLabel("결과 표시 스타일:"))
         top_bar_layout.addWidget(option1)
         top_bar_layout.addWidget(option2)
-        self.results_browser = QTextBrowser()
+        self.results_browser = PlainCopyTextBrowser()
         self.results_browser.setFont(QFont(self.font_family, self.font_size))
         self.results_browser.setOpenExternalLinks(False)
         self.results_browser.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)

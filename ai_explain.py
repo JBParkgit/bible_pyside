@@ -25,6 +25,8 @@ from PySide6.QtWidgets import (
     QTextBrowser, QVBoxLayout, QWidget,
 )
 
+from html_utils import PlainCopyTextBrowser
+
 
 API_KEY_URL = "https://aistudio.google.com/apikey"
 # 모델 콤보는 편집 가능하므로 여기 없는 이름도 직접 입력할 수 있다.
@@ -363,7 +365,7 @@ class AiExplanationDialog(QDialog):
         self.reference_label.setWordWrap(True)
         layout.addWidget(self.reference_label)
 
-        self.browser = QTextBrowser()
+        self.browser = PlainCopyTextBrowser()
         self.browser.setOpenExternalLinks(True)
         self.browser.setFont(QFont(font_family, font_size))
         layout.addWidget(self.browser, 1)

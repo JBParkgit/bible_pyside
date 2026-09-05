@@ -8,7 +8,9 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, Slot, QUrl, QPoint, QSize, QTimer
 from PySide6.QtGui import QFont, QTextOption, QPalette, QTextCursor, QKeySequence, QKeyEvent, QIcon
 
-from html_utils import apply_text_layout, get_text_alignment, get_text_direction, html_escape
+from html_utils import (
+    apply_text_layout, get_text_alignment, get_text_direction, html_escape, _PlainCopyMixin,
+)
 from body_style import body_style_from_settings
 
 
@@ -21,7 +23,7 @@ HIGHLIGHT_COLORS = {
 SELECTED_VERSE_COLOR = "#dbeafe"
 
 
-class CustomTextBrowser(QTextBrowser):
+class CustomTextBrowser(_PlainCopyMixin, QTextBrowser):
     def keyPressEvent(self, event: QKeyEvent):
         if event.matches(QKeySequence.StandardKey.Copy):
             self.custom_copy()

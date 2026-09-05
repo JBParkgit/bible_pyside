@@ -11,6 +11,7 @@ from PySide6.QtGui import QFont, QKeyEvent, QTextOption, QPalette, QKeySequence,
 
 # BookChapterPopup 클래스 정의를 삭제하고 아래 import 문으로 대체합니다.
 from popups import BookChapterPopup
+from html_utils import PlainCopyTextBrowser
 
 class ReadModeViewer(QDialog):
     """
@@ -54,7 +55,7 @@ class ReadModeViewer(QDialog):
         main_layout.addWidget(menu_bar)
 
         # 2. 본문 표시를 위한 텍스트 브라우저
-        self.text_browser = QTextBrowser()
+        self.text_browser = PlainCopyTextBrowser()
         self.text_browser.setOpenExternalLinks(False)
         self.text_browser.setOpenLinks(False)
         self.text_browser.setFont(QFont(self.font_family, self.font_size))

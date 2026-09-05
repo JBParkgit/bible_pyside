@@ -9,6 +9,7 @@ from PySide6.QtCore import Qt, Signal, Slot, QUrl, QTimer, QPoint
 from PySide6.QtGui import QFont, QTextOption, QPalette
 
 from bible_view import SharedBibleView
+from html_utils import PlainCopyTextBrowser
 
 class CompositeTab(QWidget):
     # 모든 자식 위젯의 시그널을 중계합니다.
@@ -158,7 +159,7 @@ class CompositeTab(QWidget):
 
         layout.addWidget(self.commentary_control_bar)
 
-        self.commentary_text_browser = QTextBrowser()
+        self.commentary_text_browser = PlainCopyTextBrowser()
         self.commentary_text_browser.setFont(QFont(self.font_family, self.commentary_font_size))
         self.commentary_text_browser.setOpenExternalLinks(False)
         self.commentary_text_browser.setWordWrapMode(QTextOption.WrapAnywhere)
@@ -227,7 +228,7 @@ class CompositeTab(QWidget):
         control_bar_layout.addStretch(1)
         control_bar_layout.addWidget(self.crossref_current_verse_label)
 
-        self.crossref_text_browser = QTextBrowser()
+        self.crossref_text_browser = PlainCopyTextBrowser()
         self.crossref_text_browser.setFont(QFont(self.font_family, self.crossref_font_size))
         self.crossref_text_browser.setReadOnly(True)
         self.crossref_text_browser.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)

@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from html_utils import html_attr_escape, html_escape
+from html_utils import html_attr_escape, html_escape, PlainCopyTextBrowser
 
 
 class OriginalLanguageTab(QWidget):
@@ -59,11 +59,11 @@ class OriginalLanguageTab(QWidget):
         splitter = QSplitter()
         splitter.setOrientation(Qt.Horizontal)
 
-        self.content_browser = QTextBrowser()
+        self.content_browser = PlainCopyTextBrowser()
         self.content_browser.setOpenLinks(False)
         self.content_browser.setOpenExternalLinks(False)
 
-        self.detail_browser = QTextBrowser()
+        self.detail_browser = PlainCopyTextBrowser()
         self.detail_browser.setOpenExternalLinks(False)
 
         splitter.addWidget(self.content_browser)
