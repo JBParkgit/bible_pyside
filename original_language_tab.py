@@ -15,8 +15,12 @@ from html_utils import html_attr_escape, html_escape, PlainCopyTextBrowser
 
 class OriginalLanguageTab(QWidget):
     request_navigation = Signal(str, int, int)
+    # 원어 표시 방식(스트롱번호/뜻/원어만)이 바뀔 때 방출 → 설정 저장용
+    original_display_changed = Signal(str)
 
-    def __init__(self, data_loader, parent=None):
+    DISPLAY_MODES = ("strongs", "gloss", "plain")
+
+    def __init__(self, data_loader, parent=None, original_display="strongs"):
         super().__init__(parent)
         self.data_loader = data_loader
         self.current_book = None
@@ -26,6 +30,7 @@ class OriginalLanguageTab(QWidget):
         self.highlight_verse = False
         self.current_chapter_data = None
         self.theme_mode = "light"
+        self._original_display = original_display if original_display in self.DISPLAY_MODES else "strongs"
         self.init_ui()
         self.connect_signals()
 
@@ -51,8 +56,19 @@ class OriginalLanguageTab(QWidget):
         self.mode_combo.addItem("KJV 원어", "kjv")
         self.mode_combo.addItem("개역한글 원어", "hrv")
 
+        # 원어 옆에 스트롱번호/뜻을 얼마나 함께 보여줄지 선택
+        self.display_combo = QComboBox()
+        self.display_combo.setToolTip("원어 단어와 함께 표시할 정보를 선택합니다.")
+        self.display_combo.addItem("원어 + 스트롱번호", "strongs")
+        self.display_combo.addItem("원어 + 뜻", "gloss")
+        self.display_combo.addItem("원어만 보기", "plain")
+        idx = self.display_combo.findData(self._original_display)
+        if idx >= 0:
+            self.display_combo.setCurrentIndex(idx)
+
         toolbar_layout.addWidget(self.location_label)
         toolbar_layout.addStretch(1)
+        toolbar_layout.addWidget(self.display_combo)
         toolbar_layout.addWidget(self.mode_combo)
         layout.addWidget(toolbar)
 
@@ -73,8 +89,21 @@ class OriginalLanguageTab(QWidget):
 
     def connect_signals(self):
         self.mode_combo.currentIndexChanged.connect(self.render_content)
+        self.display_combo.currentIndexChanged.connect(self.on_display_mode_changed)
         self.content_browser.anchorClicked.connect(self.handle_anchor_clicked)
         self.detail_browser.anchorClicked.connect(self.handle_anchor_clicked)
+
+    def on_display_mode_changed(self):
+        mode = self.display_combo.currentData() or "strongs"
+        self._original_display = mode
+        if mode != "strongs":
+            # 스트롱번호 링크가 사라지므로 우측 상세 정보도 비운다.
+            self.detail_browser.setHtml("")
+        self.render_content()
+        self.original_display_changed.emit(mode)
+
+    def get_original_display(self):
+        return self._original_display
 
     def update_all_content(self, book, chapter, current_verse=None, highlight=False):
         same_location = (book == self.current_book and chapter == self.current_chapter)
@@ -93,6 +122,7 @@ class OriginalLanguageTab(QWidget):
         self.render_content()
 
     def render_content(self):
+        self.content_browser.setLayoutDirection(Qt.LeftToRight)
         if not self.current_book or not self.current_chapter:
             self.content_browser.setHtml("<p>구절을 선택하면 원어 정보가 표시됩니다.</p>")
             return
@@ -106,6 +136,18 @@ class OriginalLanguageTab(QWidget):
             return
 
         mode = self.mode_combo.currentData()
+        verses = self.current_chapter_data["verses"]
+
+        # QTextBrowser 의 리치텍스트 엔진은 HTML dir 속성/CSS direction/유니코드
+        # 임베딩 제어문자를 모두 무시한다. 인라인 토큰을 우→좌로 배치하려면
+        # 위젯 자체의 레이아웃 방향을 바꾸는 수밖에 없다. 히브리어·아람어 장은
+        # RTL, 헬라어(신약) 장은 LTR 로 둔다. (본문 KJV/개역한글 줄은 아래에서
+        # align='left' dir='ltr' 로 고정해 좌측 정렬을 유지한다.)
+        chapter_rtl = any(self._verse_is_rtl(v) for v in verses)
+        self.content_browser.setLayoutDirection(
+            Qt.RightToLeft if chapter_rtl else Qt.LeftToRight
+        )
+
         dark = getattr(self, "theme_mode", "light") == "dark"
         c_border = "#3d3d3d" if dark else "#d0d7de"
         c_current = "#2a4b6b" if dark else "#dbeafe"
@@ -114,10 +156,10 @@ class OriginalLanguageTab(QWidget):
         html = [
             "<html><head><style>",
             "body { font-family: 'Malgun Gothic', Arial, sans-serif; font-size: 15px; line-height: 1.6; }",
-            f".verse {{ border-bottom: 1px solid {c_border}; padding: 12px 4px; }}",
+            f".verse {{ border-bottom: 1px solid {c_border}; padding: 20px 4px; }}",
             f".verse.current {{ background-color: {c_current}; }}",
-            f".verse-number {{ font-weight: 700; color: {c_link}; text-decoration: none; margin-right: 6px; }}",
-            ".source-text { font-size: 16px; margin: 4px 0 10px 0; }",
+            f".verse-number {{ font-weight: 700; color: {c_link}; text-decoration: none; margin-right: 14px; }}",
+            ".source-text { font-size: 16px; margin: 4px 0 14px 0; }",
             ".tokens { margin-top: 6px; line-height: 2.0; }",
             ".token-word { font-size: 18px; }",
             f".token-code {{ font-size: 12px; text-decoration: none; color: {c_link}; }}",
@@ -125,15 +167,15 @@ class OriginalLanguageTab(QWidget):
             "</style></head><body>",
         ]
 
-        for verse in self.current_chapter_data["verses"]:
+        for verse in verses:
             number = verse["number"]
             css_class = "verse current" if (self.highlight_verse and self.current_verse == number) else "verse"
             source_text = verse["kjvText"] if mode == "kjv" else verse["hrvText"]
             html.append(f"<div class='{css_class}' id='v{number}'>")
             html.append(
-                f"<div class='source-text'>"
-                f"<a class='verse-number' href='verse:{number}'>{number}.</a>"
-                f"{html_escape(source_text)}</div>"
+                f"<div class='source-text' align='left' dir='ltr'>"
+                f"<a class='verse-number' href='verse:{number}'>{number}</a>"
+                f"&nbsp;&nbsp;&nbsp;{html_escape(source_text)}</div>"
             )
             html.append(self.render_original_tokens(verse))
             html.append("</div>")
@@ -143,24 +185,40 @@ class OriginalLanguageTab(QWidget):
         if self.highlight_verse and self.current_verse:
             QTimer.singleShot(0, lambda: self.content_browser.scrollToAnchor(f"v{self.current_verse}"))
 
+    @staticmethod
+    def _verse_is_rtl(verse):
+        # 방향 메타데이터를 우선 쓰되, 누락/오류에 대비해 언어로도 판단한다.
+        # 히브리어·아람어는 우→좌(RTL), 헬라어는 좌→우(LTR).
+        if verse.get("originalDirection") == "rtl":
+            return True
+        if verse.get("originalDirection") == "ltr":
+            return False
+        lang = (verse.get("originalLanguage") or "").strip().lower()
+        return lang in ("hebrew", "aramaic")
+
     def render_original_tokens(self, verse):
-        direction = "rtl" if verse.get("originalDirection") == "rtl" else "ltr"
-        align = "right" if direction == "rtl" else "left"
+        is_rtl = self._verse_is_rtl(verse)
 
         # QTextBrowser 는 inline-block/flex 를 지원하지 않아 토큰마다 <br> 를 넣으면
         # 단어별로 세로로 길게 늘어난다. 원어 단어 + (스트롱번호 뜻) 을 한 덩어리로
         # 인라인 배치하고 토큰 사이 간격만 벌려 자연스럽게 줄바꿈되도록 한다.
+        display = getattr(self, "_original_display", "strongs")
+        show_codes = display == "strongs"
+        show_gloss = display in ("strongs", "gloss")
+
         rendered = []
         for token in verse.get("originalTokens", []):
             token_text = html_escape(token.get("text", ""))
             if not token_text:
                 continue
             codes = token.get("strongs", []) or []
-            code_links = " ".join(
-                f"<a class='token-code' href='strong:{html_attr_escape(code)}'>{html_escape(code)}</a>"
-                for code in codes
-            )
-            gloss = self.get_token_gloss(codes)
+            code_links = ""
+            if show_codes:
+                code_links = " ".join(
+                    f"<a class='token-code' href='strong:{html_attr_escape(code)}'>{html_escape(code)}</a>"
+                    for code in codes
+                )
+            gloss = self.get_token_gloss(codes) if show_gloss else ""
             piece = [f"<span class='token-word'>{token_text}</span>"]
             meta = []
             if code_links:
@@ -175,10 +233,9 @@ class OriginalLanguageTab(QWidget):
             return ""
 
         body = "&nbsp;&nbsp; ".join(rendered)
-        return (
-            f"<div class='tokens' dir='{direction}' "
-            f"style='direction:{direction}; text-align:{align};'>{body}</div>"
-        )
+        # 토큰 순서(우→좌)는 content_browser 의 위젯 레이아웃 방향으로 처리한다.
+        # (render_content 에서 히브리어·아람어 장이면 RightToLeft 로 설정)
+        return f"<div class='tokens' dir='{'rtl' if is_rtl else 'ltr'}'>{body}</div>"
 
     def get_token_gloss(self, codes):
         glosses = []
@@ -215,7 +272,7 @@ class OriginalLanguageTab(QWidget):
 
         usage = self.data_loader.get_strong_usage(code)
         original = entry.get("original", "")
-        original_dir = "rtl" if entry.get("language") == "Hebrew" else "ltr"
+        original_dir = "rtl" if (entry.get("language") or "").strip().lower() in ("hebrew", "aramaic") else "ltr"
         usage_items = usage["items"][:200]
 
         dark = getattr(self, "theme_mode", "light") == "dark"

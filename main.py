@@ -513,7 +513,11 @@ class MainWindow(QMainWindow):
         self.commentary_tab = CommentaryTab(self.data_loader, self.commentary_data_loader, initial_settings=self._settings, bible_db=self.bible_db)
         self.crossref_tab = CrossRefTab(self.data_loader, self.crossref_data_loader, initial_settings=self._settings, bible_db=self.bible_db)
         self.memo_tab = MemoTab(self.data_loader, initial_settings=self._settings, bible_db=self.bible_db)
-        self.original_language_tab = OriginalLanguageTab(self.original_language_data_loader)
+        self.original_language_tab = OriginalLanguageTab(
+            self.original_language_data_loader,
+            original_display=self._settings.get('original_display_mode', 'strongs'),
+        )
+        self.original_language_tab.original_display_changed.connect(self.save_settings)
         
         self.composite_tab = CompositeTab(self.data_loader, self.commentary_data_loader, self.crossref_data_loader, initial_settings=self._settings, bible_db=self.bible_db)
 
@@ -1527,6 +1531,7 @@ class MainWindow(QMainWindow):
             'gemini_api_key': self._settings.get('gemini_api_key', ''),
             'gemini_model': self._settings.get('gemini_model', DEFAULT_MODEL),
             'gemini_prompt': self._settings.get('gemini_prompt', ''),
+            'original_display_mode': self.original_language_tab.get_original_display(),
         }
         settings.update(body_style_to_settings(
             getattr(self, '_body_style', None) or body_style_from_settings(self._settings)
