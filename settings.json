@@ -1,6 +1,6 @@
 {
-    "book": "빌립보서",
-    "chapter": 4,
+    "book": "시편",
+    "chapter": 1,
     "font_family": "맑은 고딕",
     "bible_font_size": 13,
     "verse_display_mode": 2,
@@ -24,7 +24,7 @@
     "gemini_api_key": "",
     "gemini_model": "gemini-3.6-flash",
     "gemini_prompt": "",
-    "original_display_mode": "plain",
+    "original_display_mode": "strongs",
     "body_line_height": 1.6,
     "body_verse_spacing": 6,
     "body_num_scale": 85,
