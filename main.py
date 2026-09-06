@@ -411,7 +411,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("물댄동산 성경 V.5811.10")
+        self.setWindowTitle("물댄동산 성경 V.5811.11")
         self.setWindowIcon(QIcon('book.ico'))
         self.setGeometry(100, 100, 1200, 800)
         self._settings = self.load_settings()
