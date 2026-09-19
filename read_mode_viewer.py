@@ -303,10 +303,16 @@ class ReadModeViewer(QDialog):
     @Slot()
     def show_book_chapter_popup(self):
         """책/장 선택 팝업을 표시합니다."""
-        popup = BookChapterPopup(self.data_loader, self)
+        popup = BookChapterPopup(self.data_loader, self, self.current_book, self.current_chapter)
         popup.selection_made.connect(self.navigate_to)
+        popup.text_navigation.connect(self._navigate_from_popup_text)
         popup.move(self.location_btn.mapToGlobal(self.location_btn.rect().bottomLeft()))
         popup.show()
+
+    @Slot(str)
+    def _navigate_from_popup_text(self, text):
+        self.nav_input.setText(text)
+        self.navigate_from_input()
 
     def keyPressEvent(self, event: QKeyEvent):
         """키보드 입력을 처리합니다 (Esc)."""

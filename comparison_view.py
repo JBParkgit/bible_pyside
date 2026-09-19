@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Slot, Signal
 from PySide6.QtGui import QFont
 
-from html_utils import get_direction_style, html_escape, PlainCopyTextBrowser
+from html_utils import get_direction_style, get_text_direction, html_escape, PlainCopyTextBrowser
 
 class ComparisonDialog(QDialog):
     """
@@ -194,22 +194,36 @@ class ComparisonDialog(QDialog):
         for trans_name in translations:
             data = self.data_loader.load_translation_data(trans_name)
             direction_style = get_direction_style(data)
+            is_rtl = get_text_direction(data) == "rtl"
             lines = []
             for verse_num in range(start, end + 1):
                 verse_text = self.data_loader.get_verse_text(
                     trans_name, self.current_book, self.current_chapter, verse_num
                 )
-                if verse_text:
-                    if start == end:
-                        lines.append(f"<div class='verse-line'>{html_escape(verse_text)}</div>")
-                    else:
-                        lines.append(
-                            f"<div class='verse-line'><span class='verse-number'>{verse_num}</span> "
-                            f"{html_escape(verse_text)}</div>"
-                        )
+                if not verse_text:
+                    continue
+                safe_text = html_escape(verse_text)
+                if start != end:
+                    num_html = f"<span class='verse-number'>{verse_num}</span> "
+                else:
+                    num_html = ""
+                if is_rtl:
+                    # QTextBrowser는 CSS direction/dir 속성을 무시하므로,
+                    # bible_view.py와 동일하게 폭 100% 테이블 + align="right"로 우측 정렬한다.
+                    lines.append(
+                        "<table width='100%' border='0' cellspacing='0' cellpadding='0' "
+                        "style='margin: 2px 0;'><tr>"
+                        f"<td align='right' dir='rtl'>{num_html}{safe_text}</td>"
+                        "</tr></table>"
+                    )
+                else:
+                    lines.append(f"<div class='verse-line'>{num_html}{safe_text}</div>")
 
+            title_align = " align='right'" if is_rtl else ""
             html_parts.append(f"<div class='translation' {direction_style}>")
-            html_parts.append(f"<div class='translation-title'>{html_escape(trans_name)}</div>")
+            html_parts.append(
+                f"<div class='translation-title'{title_align}>{html_escape(trans_name)}</div>"
+            )
             if lines:
                 # 각 절이 이미 block(<div>)이므로 <br>로 이으면 빈 줄이 하나 더 생긴다.
                 html_parts.append("".join(lines))
@@ -276,7 +290,14 @@ class ComparisonDialog(QDialog):
     def show_book_chapter_popup(self):
         from popups import BookChapterPopup
         
-        popup = BookChapterPopup(self.data_loader, self)
+        popup = BookChapterPopup(self.data_loader, self, self.current_book, self.current_chapter)
         popup.selection_made.connect(lambda book, chap: self.update_location(book, chap, 1))
+        popup.text_navigation.connect(self._navigate_from_popup_text)
         popup.move(self.location_btn.mapToGlobal(self.location_btn.rect().bottomLeft()))
         popup.show()
+
+    @Slot(str)
+    def _navigate_from_popup_text(self, text):
+        book, chapter, verse = self.data_loader.parse_reference(text)
+        if book and chapter:
+            self.update_location(book, chapter, verse if verse is not None else 1)

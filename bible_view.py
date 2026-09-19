@@ -24,12 +24,35 @@ SELECTED_VERSE_COLOR = "#dbeafe"
 
 
 class CustomTextBrowser(_PlainCopyMixin, QTextBrowser):
+    # Ctrl+휠(또는 Ctrl+ +/-)로 확대/축소할 때 한 단계(+1/-1)를 상위 뷰로 전달한다.
+    zoom_step = Signal(int)
+
     def keyPressEvent(self, event: QKeyEvent):
         if event.matches(QKeySequence.StandardKey.Copy):
             self.custom_copy()
             event.accept()
-        else:
-            super().keyPressEvent(event)
+            return
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            if event.key() in (Qt.Key.Key_Plus, Qt.Key.Key_Equal):
+                self.zoom_step.emit(1)
+                event.accept()
+                return
+            if event.key() == Qt.Key.Key_Minus:
+                self.zoom_step.emit(-1)
+                event.accept()
+                return
+        super().keyPressEvent(event)
+
+    def wheelEvent(self, event):
+        # Qt 기본 동작(zoomInF)은 self.font_size 와 설정값을 갱신하지 않으므로
+        # 직접 가로채서 한 단계씩 상위 뷰로 알린다.
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            delta = event.angleDelta().y()
+            if delta:
+                self.zoom_step.emit(1 if delta > 0 else -1)
+            event.accept()
+            return
+        super().wheelEvent(event)
 
     def custom_copy(self):
         cursor = self.textCursor()
@@ -227,6 +250,7 @@ class SharedBibleView(QWidget):
     def connect_signals(self):
         self.translation_combo.currentTextChanged.connect(self.on_translation_changed)
         self.text_browser.verticalScrollBar().valueChanged.connect(self.scroll_changed.emit)
+        self.text_browser.zoom_step.connect(self.apply_zoom_delta)
         self.text_browser.customContextMenuRequested.connect(self.show_context_menu)
         self.text_browser.anchorClicked.connect(self.on_verse_anchor_clicked)
         self.text_browser.selectionChanged.connect(self.update_action_buttons_state)
@@ -455,6 +479,18 @@ class SharedBibleView(QWidget):
         self.font_size = max(8, size)
         self.text_browser.setFont(QFont(self.font_family, self.font_size))
         self.update_content()
+
+    @Slot(int)
+    def apply_zoom_delta(self, delta):
+        """마우스 Ctrl+휠 / Ctrl+ +- 확대·축소. 스크롤 위치를 유지한 채 다시 그리고,
+        바뀐 크기를 상위(MainWindow)로 알려 다른 창 연동 + 설정 저장이 되게 한다."""
+        new_size = max(8, min(72, self.font_size + delta))
+        if new_size == self.font_size:
+            return
+        self.font_size = new_size
+        self.text_browser.setFont(QFont(self.font_family, self.font_size))
+        self.update_content(preserve_scroll=True, realign_verse=True)
+        self.font_size_changed.emit(self.font_size)
 
     def apply_body_style(self, style):
         """본문 타이포그래피(행간·절 간격·글꼴 등)를 갱신하고 다시 그린다."""

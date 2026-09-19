@@ -411,7 +411,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("물댄동산 성경 V.5811.11")
+        self.setWindowTitle("물댄동산 성경 V.5811.12.0")
         self.setWindowIcon(QIcon('book.ico'))
         self.setGeometry(100, 100, 1200, 800)
         self._settings = self.load_settings()
@@ -490,6 +490,13 @@ class MainWindow(QMainWindow):
         self.tab_widget.setCurrentIndex(min(default_idx, self.tab_widget.count() - 1))
         
         QTimer.singleShot(100, self.sync_aux_tabs_with_main_view)
+
+        # 프로그램 시작 시 구절 이동 입력칸에 커서를 둔다.
+        QTimer.singleShot(0, self._focus_nav_input_on_start)
+
+    def _focus_nav_input_on_start(self):
+        self.nav_input.setFocus(Qt.ShortcutFocusReason)
+        self.nav_input.selectAll()
 
     def init_ui(self):
         central_widget = QWidget()
@@ -809,6 +816,8 @@ class MainWindow(QMainWindow):
         self.connect_aux_view_signals(self.commentary_tab.bible_view)
         self.connect_aux_view_signals(self.crossref_tab.bible_view)
         self.connect_aux_view_signals(self.memo_tab.bible_view)
+        # 통합 탭의 성경 뷰는 connect_aux_view_signals 를 거치지 않으므로 확대/축소만 따로 연결
+        self.composite_tab.bible_view.font_size_changed.connect(self.sync_font_size)
         
         self.search_tab.request_commentary.connect(self.go_to_commentary_for_verse)
         self.search_tab.request_cross_ref.connect(self.go_to_crossref_for_verse)
@@ -930,6 +939,7 @@ class MainWindow(QMainWindow):
         new_view.request_original_language.connect(self.go_to_original_language_for_range)
         new_view.request_ai_explanation.connect(self.request_ai_explanation_for_selection)
         new_view.highlight_changed.connect(self.on_highlight_changed)
+        new_view.font_size_changed.connect(self.sync_font_size)
     
     @Slot()
     def on_highlight_changed(self):
@@ -1312,10 +1322,13 @@ class MainWindow(QMainWindow):
 
     def get_navigation_target(self):
         current_widget = self.tab_widget.currentWidget()
-        
-        if isinstance(current_widget, (SearchTab, AdditionalReadTab)):
+
+        if isinstance(current_widget, AdditionalReadTab):
+            return current_widget
+
+        if isinstance(current_widget, SearchTab):
             return self.read_tab
-        
+
         # '통합' 탭도 메인 네비게이션 타겟이 되도록 추가
         if current_widget in [self.read_tab, self.commentary_tab, self.crossref_tab, self.memo_tab, self.composite_tab]:
             return current_widget

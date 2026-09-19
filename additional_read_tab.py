@@ -184,9 +184,15 @@ class AdditionalReadTab(QWidget):
 
     @Slot()
     def show_book_chapter_popup(self):
-        popup = BookChapterPopup(self.data_loader, self)
+        popup = BookChapterPopup(self.data_loader, self, self.current_book, self.current_chapter)
         popup.selection_made.connect(self.navigate_to)
+        popup.text_navigation.connect(self._navigate_from_popup_text)
         popup.move(self.location_btn.mapToGlobal(self.location_btn.rect().bottomLeft())); popup.show()
+
+    @Slot(str)
+    def _navigate_from_popup_text(self, text):
+        self.nav_input.setText(text)
+        self.navigate_from_input()
 
     def get_bible_views(self): return [self.splitter.widget(i) for i in range(self.splitter.count())]
 
@@ -199,6 +205,7 @@ class AdditionalReadTab(QWidget):
         new_view.request_send_to_word.connect(self.request_send_to_word); new_view.request_send_to_powerpoint.connect(self.request_send_to_powerpoint)
         new_view.request_commentary.connect(self.request_commentary); new_view.request_cross_ref.connect(self.request_cross_ref)
         new_view.scroll_changed.connect(self.sync_scroll)
+        new_view.font_size_changed.connect(self._on_view_zoomed)
         self.splitter.addWidget(new_view)
         new_view.update_content(self.current_book, self.current_chapter)
         self.update_view_count_display(self.splitter.count())
@@ -256,6 +263,17 @@ class AdditionalReadTab(QWidget):
         self.font_size = max(8, self.font_size + delta)
         self.font_size_label.setText(str(self.font_size))
         for view in self.get_bible_views(): view.set_font_size(self.font_size)
+        self.settings_changed.emit()
+
+    @Slot(int)
+    def _on_view_zoomed(self, size):
+        """한 창에서 Ctrl+휠로 확대/축소하면 같은 탭의 나머지 창도 맞춘다."""
+        if self.font_size == size:
+            return
+        self.font_size = size
+        self.font_size_label.setText(str(self.font_size))
+        for view in self.get_bible_views():
+            view.set_font_size(size)
         self.settings_changed.emit()
 
     def set_verse_display_mode(self, mode_id):
