@@ -371,6 +371,11 @@ class ReadTab(QWidget):
             first_view = views[0]
             first_view.scroll_to_verse(verse_num)
 
+    def flash_highlight_verse(self, verse_num: int):
+        views = self.get_bible_views()
+        if views:
+            views[0].flash_highlight_verse(verse_num)
+
     def update_all_views(self, book, chapter):
         self.current_book = book
         self.current_chapter = chapter
@@ -584,7 +589,7 @@ class MainWindow(QMainWindow):
         self.next_chap_btn = QPushButton()
         self.next_book_btn = QPushButton()
         self.nav_input = QLineEdit()
-        self.nav_input.setMaximumWidth(90)
+        self.nav_input.setMaximumWidth(220)
         self.go_btn = QPushButton("이동")
 
         self.history_back_btn = QPushButton()
@@ -640,7 +645,7 @@ class MainWindow(QMainWindow):
         self.search_translation_combo = QComboBox()
         self.search_translation_combo.addItems(self.data_loader.get_available_translations())
         self.search_input = QLineEdit()
-        self.search_input.setMaximumWidth(250)
+        self.search_input.setMaximumWidth(150)
         self.search_input.setClearButtonEnabled(True)
         self._search_input_action = self.search_input.addAction(
             themed_icon("search", TOKENS[resolve_mode(self._settings.get('theme', 'Light'))]["text_secondary"]),
@@ -1569,10 +1574,13 @@ class MainWindow(QMainWindow):
             if self.tab_widget.currentWidget() is target_tab:
                 if isinstance(target_tab, ReadTab):
                     target_tab.scroll_to_verse(verse_to_scroll)
+                    target_tab.flash_highlight_verse(verse_to_scroll)
                 elif isinstance(target_tab, MemoTab):
                     target_tab.bible_view.scroll_to_verse(verse_to_scroll)
+                    target_tab.bible_view.flash_highlight_verse(verse_to_scroll)
                 elif hasattr(target_tab, 'bible_view'): # '통합' 탭 포함
                     target_tab.bible_view.scroll_to_verse(verse_to_scroll)
+                    target_tab.bible_view.flash_highlight_verse(verse_to_scroll)
                 self.pending_scroll_info = None
 
     @Slot(int)
@@ -1693,6 +1701,7 @@ class MainWindow(QMainWindow):
         if isinstance(target_tab, AdditionalReadTab):
              target_tab.navigate_to(book, chapter)
              target_tab.scroll_to_verse(verse)
+             target_tab.flash_highlight_verse(verse)
              return
         
         self.add_to_history(book, chapter, verse)
@@ -1736,6 +1745,7 @@ class MainWindow(QMainWindow):
         if isinstance(new_tab, AdditionalReadTab):
             QTimer.singleShot(0, lambda: new_tab.navigate_to(book, chapter))
             QTimer.singleShot(100, lambda: new_tab.scroll_to_verse(verse))
+            QTimer.singleShot(100, lambda: new_tab.flash_highlight_verse(verse))
 
     @Slot(str)
     def on_request_send_to_word(self, text): self.send_to_word(text)

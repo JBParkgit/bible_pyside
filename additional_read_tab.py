@@ -245,6 +245,9 @@ class AdditionalReadTab(QWidget):
     def scroll_to_verse(self, verse_num):
         if views := self.get_bible_views(): views[0].scroll_to_verse(verse_num)
 
+    def flash_highlight_verse(self, verse_num):
+        if views := self.get_bible_views(): views[0].flash_highlight_verse(verse_num)
+
     @Slot(int)
     def sync_scroll(self, value):
         if self._is_scrolling: return

@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QScrollArea
 )
 from PySide6.QtCore import Qt, Signal, Slot, QUrl, QPoint, QSize, QTimer
-from PySide6.QtGui import QFont, QTextOption, QPalette, QTextCursor, QKeySequence, QKeyEvent, QIcon
+from PySide6.QtGui import QFont, QTextOption, QPalette, QTextCursor, QKeySequence, QKeyEvent, QIcon, QShortcut
 
 from html_utils import (
     apply_text_layout, get_text_alignment, get_text_direction, html_escape, _PlainCopyMixin,
@@ -257,6 +257,10 @@ class SharedBibleView(QWidget):
         self.send_to_word_button.clicked.connect(self.trigger_send_to_word)
         self.send_to_ppt_button.clicked.connect(self.trigger_send_to_powerpoint)
         self.selection_copy_button.clicked.connect(self.copy_selected_verses)
+        # Esc: 구절 선택(클릭) 및 마우스 드래그 텍스트 선택 해제
+        self.escape_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+        self.escape_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.escape_shortcut.activated.connect(self.clear_all_selection)
         self.selection_compare_button.clicked.connect(self.open_selected_comparison)
         self.selection_original_button.clicked.connect(self.open_selected_original_language)
         self.selection_ai_button.clicked.connect(self.open_selected_ai_explanation)
@@ -368,6 +372,28 @@ class SharedBibleView(QWidget):
         self.update_action_buttons_state()
         if update:
             self.update_content(preserve_scroll=True, realign_verse=False)
+
+    def clear_all_selection(self):
+        """Esc 키: 텍스트 선택과 구절 선택을 모두 해제한다."""
+        cursor = self.text_browser.textCursor()
+        if cursor.hasSelection():
+            cursor.clearSelection()
+            self.text_browser.setTextCursor(cursor)
+        if self.selected_verse_anchor is not None or self.selection_bar.isVisible():
+            self.clear_verse_selection(update=True)
+        else:
+            self.update_action_buttons_state()
+
+    def flash_highlight_verse(self, verse_num, duration_ms=1500):
+        """검색 등으로 특정 절로 이동했을 때 도착한 절을 잠시 강조 표시한다."""
+        self.selected_verse_anchor = verse_num
+        self.selected_verse_focus = verse_num
+        self.update_content(preserve_scroll=True, realign_verse=False)
+        QTimer.singleShot(duration_ms, lambda vn=verse_num: self._end_flash_highlight(vn))
+
+    def _end_flash_highlight(self, verse_num):
+        if self.selected_verse_anchor == verse_num and self.selected_verse_focus == verse_num:
+            self.clear_verse_selection(update=True)
 
     def update_selection_bar(self):
         selected = self._selected_verse_numbers()
